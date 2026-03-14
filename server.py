@@ -768,29 +768,59 @@ function renderAll(d) {
     ['Risk Used',      rs.loss_used_pct.toFixed(0)+'%', 'of '+st.max_loss_pct+'% limit', rs.loss_used_pct>80?'l':rs.loss_used_pct>50?'w':'g'],
   ].map(([l,v,s,c])=>`<div class="card"><div class="card-lbl">${l}</div><div class="card-val ${c||''}">${v}</div>${s?`<div class="card-sub ${c||'m'}">${s}</div>`:''}</div>`).join('');
 
-  // ── CAGR PANEL
+  // ── CAGR PANEL — clean card style
   const cagrMet = p.cagr >= st.cagr_target;
-  const cagrPct = Math.min(p.cagr / st.cagr_target * 100, 150);
-  document.getElementById('cagrBig').innerHTML = `<div class="num ${cagrMet?'g':'w'}">${p.cagr}%</div><div class="lbl">${cagrMet?'✓ TARGET MET':'↓ BELOW TARGET'}</div>`;
-  document.getElementById('cagrProg').innerHTML = `<div class="prog-meta"><span style="font-size:0.72rem">Actual vs Target</span><span style="font-family:'DM Mono',monospace;font-size:0.7rem">${p.cagr}% / ${st.cagr_target}%</span></div><div class="prog-track"><div class="prog-fill" style="width:${Math.min(cagrPct,100)}%;background:${cagrMet?'var(--gain)':'var(--warn)'}"></div></div>`;
-  document.getElementById('cagrStats').innerHTML = [
-    ['Target', st.cagr_target+'%', ''],
-    ['Actual CAGR', `<span class="${cagrMet?'g':'w'}">${p.cagr}%</span>`, ''],
-    ['Simple Return', `<span class="${gc(p.total_pl_pct)}">${pct(p.total_pl_pct)}</span>`, ''],
-    ['Gap', cagrMet ? `<span class="g">+${(p.cagr-st.cagr_target).toFixed(1)}% above</span>` : `<span class="w">${(st.cagr_target-p.cagr).toFixed(1)}% below</span>`, ''],
-  ].map(([n,v])=>`<div class="sr"><span class="sn">${n}</span><span class="sv">${v}</span></div>`).join('');
+  const cagrPct = Math.min(p.cagr / st.cagr_target * 100, 100);
+  const cagrColor = cagrMet ? 'var(--gain)' : 'var(--warn)';
+  document.getElementById('cagrBig').innerHTML = '';
+  document.getElementById('cagrProg').innerHTML = '';
+  document.getElementById('cagrStats').innerHTML = `
+    <div style="text-align:center;padding:20px 0 16px">
+      <div style="font-size:0.72rem;color:var(--muted);margin-bottom:6px;letter-spacing:1px">YOUR CAGR</div>
+      <div style="font-size:3rem;font-weight:800;color:${cagrColor};letter-spacing:-2px;line-height:1">${p.cagr}%</div>
+      <div style="font-size:0.75rem;color:var(--muted);margin-top:6px">Target: <strong style="color:var(--text)">${st.cagr_target}%</strong></div>
+    </div>
+    <div style="background:var(--s3);border-radius:4px;height:8px;margin:0 0 16px;overflow:hidden">
+      <div style="height:100%;width:${cagrPct}%;background:${cagrColor};border-radius:4px;transition:width 1s ease"></div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+      <div style="background:var(--s2);padding:12px;border-radius:4px;text-align:center">
+        <div style="font-size:0.62rem;color:var(--muted);margin-bottom:4px">RETURN</div>
+        <div style="font-size:1.1rem;font-weight:700;color:${gc(p.total_pl_pct)==='g'?'var(--gain)':'var(--loss)'}">${pct(p.total_pl_pct)}</div>
+      </div>
+      <div style="background:var(--s2);padding:12px;border-radius:4px;text-align:center;border:1px solid ${cagrColor}40">
+        <div style="font-size:0.62rem;color:var(--muted);margin-bottom:4px">STATUS</div>
+        <div style="font-size:0.85rem;font-weight:700;color:${cagrColor}">${cagrMet ? '✓ On Track' : (st.cagr_target - p.cagr).toFixed(1)+'% gap'}</div>
+      </div>
+    </div>`;
 
-  // ── RISK PANEL
+  // ── RISK PANEL — clean card style
   const rCls = rs.stop_investing?'l':rs.loss_used_pct>70?'w':'g';
-  document.getElementById('riskBig').innerHTML = `<div class="num ${rCls}">${rs.loss_used_pct.toFixed(0)}%</div><div class="lbl">${rs.stop_investing?'🚨 STOP INVESTING':rs.loss_used_pct>70?'⚠ CAUTION':'✓ WITHIN LIMITS'}</div>`;
-  document.getElementById('riskProg').innerHTML = `<div class="prog-meta"><span style="font-size:0.72rem">Loss used of budget</span><span style="font-family:'DM Mono',monospace;font-size:0.7rem">${rs.loss_used_pct.toFixed(0)}%</span></div><div class="prog-track"><div class="prog-fill" style="width:${Math.min(rs.loss_used_pct,100)}%;background:${rs.stop_investing?'var(--loss)':rs.loss_used_pct>70?'var(--warn)':'var(--gain)'}"></div></div>`;
-  document.getElementById('riskStats').innerHTML = [
-    ['Max Allowed Loss', `<span class="l">${fmtL(rs.max_loss_amt)}</span>`],
-    ['Current Loss', `<span class="${rs.actual_loss>0?'l':'g'}">${fmtL(rs.actual_loss)}</span>`],
-    ['Remaining Buffer', `<span class="${rs.stop_investing?'l':'g'}">${fmtL(rs.loss_remaining)}</span>`],
-    ['Invest Status', rs.stop_investing?'<span class="l">🚨 PAUSE</span>':'<span class="g">✓ OK</span>'],
-    ['Positions Breaching', rs.breaching_count>0?`<span class="l">${rs.breaching_count} stocks</span>`:'<span class="g">None</span>'],
-  ].map(([n,v])=>`<div class="sr"><span class="sn">${n}</span><span class="sv">${v}</span></div>`).join('');
+  const rColor = rs.stop_investing?'var(--loss)':rs.loss_used_pct>70?'var(--warn)':'var(--gain)';
+  const rIcon = rs.stop_investing ? '🚨' : rs.loss_used_pct>70 ? '⚠️' : '✅';
+  const rMsg = rs.stop_investing ? 'Stop Investing' : rs.loss_used_pct>70 ? 'Caution' : 'Safe';
+  document.getElementById('riskBig').innerHTML = '';
+  document.getElementById('riskProg').innerHTML = '';
+  document.getElementById('riskStats').innerHTML = `
+    <div style="text-align:center;padding:20px 0 16px">
+      <div style="font-size:2rem;margin-bottom:6px">${rIcon}</div>
+      <div style="font-size:1.6rem;font-weight:800;color:${rColor};letter-spacing:-1px;line-height:1">${rMsg}</div>
+      <div style="font-size:0.72rem;color:var(--muted);margin-top:6px">${rs.loss_used_pct.toFixed(0)}% of ${st.max_loss_pct}% limit used</div>
+    </div>
+    <div style="background:var(--s3);border-radius:4px;height:8px;margin:0 0 16px;overflow:hidden">
+      <div style="height:100%;width:${Math.min(rs.loss_used_pct,100)}%;background:${rColor};border-radius:4px;transition:width 1s ease"></div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+      <div style="background:var(--s2);padding:12px;border-radius:4px;text-align:center">
+        <div style="font-size:0.62rem;color:var(--muted);margin-bottom:4px">MAX LOSS</div>
+        <div style="font-size:1rem;font-weight:700;color:var(--loss)">${fmtL(rs.max_loss_amt)}</div>
+      </div>
+      <div style="background:var(--s2);padding:12px;border-radius:4px;text-align:center">
+        <div style="font-size:0.62rem;color:var(--muted);margin-bottom:4px">BUFFER LEFT</div>
+        <div style="font-size:1rem;font-weight:700;color:${rColor}">${fmtL(rs.loss_remaining)}</div>
+      </div>
+    </div>
+    ${rs.breaching_count>0 ? `<div style="margin-top:10px;padding:8px 12px;background:var(--loss-bg);border-left:3px solid var(--loss);font-size:0.75rem;color:var(--loss)">${rs.breaching_count} position${rs.breaching_count>1?'s':''} breaching ${st.pos_loss_pct}% loss limit</div>` : ''}`;
 
   // ── FUND FLOW
   if (ts) {
