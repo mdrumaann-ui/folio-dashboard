@@ -466,7 +466,7 @@ def api_ticker():
     """Fetch live index prices from Yahoo Finance — free, no API key needed."""
     symbols = {
         "NIFTY50":   "^NSEI",
-        "MIDCAP100": "^CNXMDCP100",   # NSE Midcap 100
+        "MIDCAP100": "^CNXMIDCP100",  # NSE Midcap 100 correct symbol
         "SMALLCAP":  "^CNXSC",        # NSE Smallcap 100
     }
     result = {}
@@ -893,10 +893,10 @@ tbody tr:last-child td{border-bottom:none;}
 .sector-details.show{display:block;}
 
 /* JOURNAL */
-#page-journal{height:calc(100vh - 160px);display:flex;flex-direction:column;}
-#page-journal .panel{flex:1;display:flex;flex-direction:column;overflow:hidden;margin-bottom:0;}
-.journal-layout{display:grid;grid-template-columns:190px 1fr;gap:14px;flex:1;overflow:hidden;min-height:0;}
-.journal-sidebar{background:var(--s2);border-radius:8px;padding:12px;border:1px solid var(--border);overflow-y:auto;}
+#page-journal{display:flex;flex-direction:column;}
+#page-journal .panel{display:flex;flex-direction:column;}
+.journal-layout{display:grid;grid-template-columns:190px 1fr;gap:14px;}
+.journal-sidebar{background:var(--s2);border-radius:8px;padding:12px;border:1px solid var(--border);height:fit-content;align-self:start;position:sticky;top:130px;}
 .journal-mini-cal .mc-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;}
 .journal-mini-cal .mc-title{font-size:0.68rem;font-weight:600;}
 .journal-mini-cal .mc-nav{background:none;border:none;color:var(--muted);cursor:pointer;font-size:0.85rem;padding:1px 4px;}
@@ -917,7 +917,7 @@ tbody tr:last-child td{border-bottom:none;}
 .jtool:hover{border-color:var(--accent);color:var(--accent);}
 .jtool.active{background:var(--accent);color:#fff;border-color:var(--accent);}
 .jtool-sep{width:1px;background:var(--border);margin:2px 3px;}
-.journal-textarea{background:var(--s2);border:1px solid var(--border);color:var(--text);padding:14px 16px;border-radius:8px;font-size:0.84rem;outline:none;width:100%;resize:none;font-family:'Inter',sans-serif;line-height:1.7;flex:1;min-height:0;}
+.journal-textarea{background:var(--s2);border:1px solid var(--border);color:var(--text);padding:14px 16px;border-radius:8px;font-size:0.84rem;outline:none;width:100%;resize:vertical;font-family:'Inter',sans-serif;line-height:1.7;min-height:400px;}
 .journal-textarea:focus{border-color:var(--accent);}
 .journal-save-status{font-size:0.62rem;color:var(--muted);}
 .search-results{background:var(--s2);border:1px solid var(--border);border-radius:7px;padding:8px;display:none;max-height:160px;overflow-y:auto;}
@@ -1024,10 +1024,18 @@ tbody tr:last-child td{border-bottom:none;}
 <!-- ══ PAGE: OVERVIEW ══════════════════════════════════ -->
 <div class="page active" id="page-overview">
   <div class="settings-bar">
-    <div class="sg"><label>CAGR Target %</label><input type="number" id="cagrTarget" value="15" min="1" max="100" onchange="saveSettings();loadData()"></div>
+    <div class="sg">
+      <label>Profit Target %</label>
+      <input type="number" id="cagrTarget" value="100" min="1" max="10000" onchange="saveSettings();loadData()">
+      <small style="font-size:0.58rem;color:var(--muted)">e.g. 100 = double your money</small>
+    </div>
     <div class="sg"><label>Max Loss %</label><input type="number" id="maxLoss" value="10" min="1" max="50" onchange="saveSettings();loadData()"></div>
     <div class="sg"><label>Per Stock Loss %</label><input type="number" id="posLoss" value="10" min="1" max="50" onchange="saveSettings();loadData()"></div>
-    <div class="sg"><label>Invested Since</label><input type="date" id="investedSince" value="2023-01-01" onchange="saveSettings();loadData()"></div>
+    <div class="sg" style="background:var(--s2);border:1px solid var(--border);border-radius:6px;padding:6px 10px;min-width:130px">
+      <div style="font-size:0.58rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin-bottom:3px">NIFTY P/E</div>
+      <div id="peDisplay" style="font-family:'DM Mono',monospace;font-size:0.82rem;font-weight:600;color:var(--warn)">—</div>
+      <div id="peNote" style="font-size:0.58rem;color:var(--muted);margin-top:1px">loading...</div>
+    </div>
     <span class="updated-lbl" id="updatedBar"></span>
   </div>
   <div class="alert" id="alertBanner"></div>
@@ -1035,7 +1043,7 @@ tbody tr:last-child td{border-bottom:none;}
 
   <div class="grid3">
     <div class="panel" style="margin-bottom:0">
-      <div class="panel-title">CAGR</div>
+      <div class="panel-title">Portfolio Target Progress</div>
       <div id="cagrPanel"></div>
     </div>
     <div class="panel" style="margin-bottom:0">
@@ -1392,7 +1400,7 @@ function stopAuto(){if(autoTimer){clearInterval(autoTimer);autoTimer=null;}}
 
 // ── LOAD DATA ──────────────────────────────────────────
 async function loadData(){
-  const params=new URLSearchParams({cagr_target:document.getElementById('cagrTarget').value,max_loss_pct:document.getElementById('maxLoss').value,pos_loss_pct:document.getElementById('posLoss').value,invested_since:document.getElementById('investedSince').value});
+  const params=new URLSearchParams({cagr_target:document.getElementById('cagrTarget').value,max_loss_pct:document.getElementById('maxLoss').value,pos_loss_pct:document.getElementById('posLoss').value,invested_since:'2020-01-01'});
   try{
     const r=await fetch(`/api/summary?${params}`);const d=await r.json();
     if(d.error){
@@ -1439,6 +1447,15 @@ async function updateIndexTickers(){
     }
     const upEl = document.getElementById('tickerUpdated');
     if(upEl) upEl.textContent = 'Updated '+new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
+    // Also update PE in settings bar
+    const peDisp = document.getElementById('peDisplay');
+    const peNote = document.getElementById('peNote');
+    if(peDisp && d.NIFTY50?.pe){
+      peDisp.textContent = d.NIFTY50.pe.toFixed(1)+'x';
+      const pe = d.NIFTY50.pe;
+      let note = pe > 25 ? '⚠ Expensive' : pe > 20 ? 'Fair value' : '✓ Cheap';
+      if(peNote) peNote.textContent = note;
+    }
   }catch(e){ console.log('Ticker fetch failed:', e); }
 }
 
@@ -1469,12 +1486,12 @@ function renderOverview(d){
   document.getElementById('cagrPanel').innerHTML=`
     <div style="text-align:center;padding:10px 0 8px">
       <div class="cagr-num" style="color:${cagrClr}">${p.cagr}%</div>
-      <div style="font-size:0.68rem;color:var(--muted);margin-top:4px">${cagrMet?'✓ Beating target':(st.cagr_target-p.cagr).toFixed(1)+'% below '+st.cagr_target+'% target'}</div>
+      <div style="font-size:0.68rem;color:var(--muted);margin-top:4px">${cagrMet?'✓ Target reached!':'Need '+(st.cagr_target-p.total_pl_pct).toFixed(1)+'% more to reach '+st.cagr_target+'% target'}</div>
     </div>
     <div class="cagr-bar-wrap"><div class="cagr-bar-fill" style="width:${cagrW}%;background:${cagrClr}"></div></div>
     <div class="cagr-stats">
       <div class="cagr-stat"><div class="val" style="color:${gclr(p.total_pl_pct)}">${pct(p.total_pl_pct)}</div><div class="lbl">Return</div></div>
-      <div class="cagr-stat" style="border:1px solid ${cagrClr}40"><div class="val" style="color:${cagrClr}">${cagrMet?'+'+((p.cagr-st.cagr_target).toFixed(1))+'%':'-'+((st.cagr_target-p.cagr).toFixed(1))+'%'}</div><div class="lbl">Gap</div></div>
+      <div class="cagr-stat" style="border:1px solid ${cagrClr}40"><div class="val" style="color:${cagrClr}">${cagrMet?'+'+((p.total_pl_pct-st.cagr_target).toFixed(1))+'%':'-'+((st.cagr_target-p.total_pl_pct).toFixed(1))+'%'}</div><div class="lbl">Gap</div></div>
     </div>`;
 
   // PORTFOLIO RISK
@@ -1549,27 +1566,43 @@ function renderGrowthChart(d){
   const p=d.portfolio,st=d.settings,history=d.history||[];
   let labels=[],valData=[],costData=[],targetData=[],drawdownData=[];
 
+  // Profit target = total capital × (1 + target%) — the number to beat
+  // Uses total capital (invested + cash) so withdrawals are accounted for
+  const baseCap      = p.total_capital;   // invested + cash
+  const profitTarget = baseCap * (1 + st.cagr_target/100);
+
   if(history.length>=2){
     const raw=chartMode==='monthly'?groupByMonth(history):groupByYear(history);
-    labels=raw.map(r=>r.label);valData=raw.map(r=>r.value);costData=raw.map(r=>r.total_capital||r.invested);
-    const fc=raw[0].invested;
-    targetData=raw.map((_,i)=>fc*Math.pow(1+st.cagr_target/100,chartMode==='monthly'?i/12:i));
+    labels=raw.map(r=>r.label);
+    valData=raw.map(r=>r.value);
+    // Target = flat line showing what you need to reach
+    targetData=raw.map(()=>profitTarget);
     let peak=0;drawdownData=valData.map(v=>{peak=Math.max(peak,v);return peak>0?-((peak-v)/peak*100):0;});
   }else{
-    const since=new Date(st.invested_since),now=new Date();
+    // No history — generate monthly timeline from 2023 to now as estimated
+    const since=new Date('2023-01-01'),now=new Date();
     if(chartMode==='monthly'){
       let cur=new Date(since.getFullYear(),since.getMonth(),1);const months=[];
       while(cur<=now){months.push(new Date(cur));cur=new Date(cur.getFullYear(),cur.getMonth()+1,1);}
       const n=months.length;
       labels=months.map(m=>m.toLocaleString('en-IN',{month:'short',year:'2-digit'}));
-      months.forEach((_,i)=>{const pr=i/Math.max(n-1,1),cv=Math.pow(pr,0.75)*(1+Math.sin(i*1.8)*0.03);const tc=p.total_capital*(0.3+0.7*pr);costData.push(tc);valData.push(Math.max(tc+p.total_pl*cv,tc*0.85));targetData.push(p.total_capital*Math.pow(1+st.cagr_target/100,i/12));});
-      valData[n-1]=p.total_value;costData[n-1]=p.total_capital;
+      months.forEach((_,i)=>{
+        const pr=i/Math.max(n-1,1),cv=Math.pow(pr,0.75)*(1+Math.sin(i*1.8)*0.03);
+        const tc=baseCap*(0.3+0.7*pr);
+        valData.push(Math.max(tc+p.total_pl*cv,tc*0.85));
+        targetData.push(profitTarget);
+      });
+      valData[n-1]=p.total_value;
     }else{
       const sy=since.getFullYear(),ey=now.getFullYear();
       for(let y=sy;y<=ey;y++)labels.push(y===ey?y+'★':String(y));
       const n=labels.length;
-      labels.forEach((_,i)=>{const pr=i/Math.max(n-1,1),tc=p.total_capital*(0.25+0.75*pr);costData.push(tc);valData.push(Math.max(tc+p.total_pl*Math.pow(pr,0.75),tc*0.8));targetData.push(p.total_capital*Math.pow(1+st.cagr_target/100,i));});
-      valData[n-1]=p.total_value;costData[n-1]=p.total_capital;
+      labels.forEach((_,i)=>{
+        const pr=i/Math.max(n-1,1),tc=baseCap*(0.25+0.75*pr);
+        valData.push(Math.max(tc+p.total_pl*Math.pow(pr,0.75),tc*0.8));
+        targetData.push(profitTarget);
+      });
+      valData[n-1]=p.total_value;
     }
     drawdownData=[];
   }
@@ -1588,7 +1621,7 @@ function renderGrowthChart(d){
 
   const datasets=[
     {label:'Portfolio Value',data:valData,borderColor:lineColor,backgroundColor:fillColor,borderWidth:2.5,fill:true,tension:0.4,pointRadius:ptR,pointBackgroundColor:lineColor,pointBorderColor:isDark?'#0f1117':'#f4f6fb',pointBorderWidth:2,pointHoverRadius:5},
-    {label:`CAGR Target ${st.cagr_target}%`,data:targetData,borderColor:'rgba(255,82,82,0.5)',backgroundColor:'transparent',borderWidth:1.5,borderDash:[4,4],tension:0.4,pointRadius:0},
+    {label:`Profit Target (+${st.cagr_target}%)`,data:targetData,borderColor:'rgba(255,82,82,0.5)',backgroundColor:'transparent',borderWidth:1.5,borderDash:[4,4],tension:0.4,pointRadius:0},
   ];
   if(drawdownData.length)datasets.push({label:'Drawdown %',data:drawdownData,borderColor:'rgba(255,171,64,0.6)',backgroundColor:'transparent',borderWidth:1,borderDash:[2,3],tension:0.4,pointRadius:0,yAxisID:'y2'});
 
@@ -2207,7 +2240,7 @@ function saveSettings(){
     cagrTarget:    document.getElementById('cagrTarget').value,
     maxLoss:       document.getElementById('maxLoss').value,
     posLoss:       document.getElementById('posLoss').value,
-    investedSince: document.getElementById('investedSince').value,
+    investedSince: '2020-01-01',
   };
   try{ localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); }catch(e){}
 }
@@ -2220,7 +2253,7 @@ function loadSettings(){
     if(s.cagrTarget)    document.getElementById('cagrTarget').value    = s.cagrTarget;
     if(s.maxLoss)       document.getElementById('maxLoss').value       = s.maxLoss;
     if(s.posLoss)       document.getElementById('posLoss').value       = s.posLoss;
-    if(s.investedSince) document.getElementById('investedSince').value = s.investedSince;
+
   }catch(e){}
 }
 
