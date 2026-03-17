@@ -125,6 +125,85 @@ def cached(key, fn, ttl=CACHE_TTL):
 
 
 # ─────────────────────────────────────────────────────────
+# PORTFOLIO HISTORY — auto-saves daily snapshots
+# ─────────────────────────────────────────────────────────
+
+# ─────────────────────────────────────────────────────────
+# FREE CLOUD STORAGE via JSONBin.io
+# ─────────────────────────────────────────────────────────
+# 1. Go to jsonbin.io → sign up free
+# 2. Create a bin with content: {}
+# 3. Copy the Bin ID and your API key
+# 4. Set as environment variables in Render:
+#    JSONBIN_BIN_ID   = your bin id  (e.g. 64a1b2c3d4e5f6...)
+#    JSONBIN_API_KEY  = your api key (e.g. $2b$10$...)
+# ─────────────────────────────────────────────────────────
+
+import urllib.request, urllib.error
+
+JSONBIN_BIN_ID  = os.getenv("JSONBIN_BIN_ID",  "")
+JSONBIN_API_KEY = os.getenv("JSONBIN_API_KEY",  "")
+JSONBIN_BASE    = f"https://api.jsonbin.io/v3/b/{JSONBIN_BIN_ID}"
+
+def load_history():
+    """Load portfolio history from JSONBin cloud storage."""
+    if not JSONBIN_BIN_ID or not JSONBIN_API_KEY:
+        # Fallback to local file if keys not set
+        try:
+            if os.path.exists("portfolio_history.json"):
+                with open("portfolio_history.json") as f:
+                    return json.load(f)
+        except: pass
+        return {}
+    try:
+        req = urllib.request.Request(
+            JSONBIN_BASE + "/latest",
+            headers={"X-Master-Key": JSONBIN_API_KEY, "X-Bin-Meta": "false"}
+        )
+        with urllib.request.urlopen(req, timeout=5) as r:
+            return json.loads(r.read().decode())
+    except Exception as e:
+        print(f"JSONBin load error: {e}")
+        return {}
+
+def save_snapshot(total_value, total_cost, cash):
+    """Save today's snapshot to JSONBin. Once per day."""
+    try:
+        today   = date.today().isoformat()
+        history = load_history()
+        if today in history:
+            return  # already saved today
+        history[today] = {
+            "date":          today,
+            "value":         round(total_value, 2),
+            "invested":      round(total_cost, 2),
+            "cash":          round(cash, 2),
+            "total_capital": round(total_value + cash, 2),
+            "pl":            round(total_value - total_cost, 2),
+            "pl_pct":        round((total_value - total_cost) / total_cost * 100 if total_cost > 0 else 0, 2),
+        }
+        if JSONBIN_BIN_ID and JSONBIN_API_KEY:
+            data = json.dumps(history).encode()
+            req  = urllib.request.Request(
+                JSONBIN_BASE,
+                data=data,
+                method="PUT",
+                headers={"Content-Type": "application/json", "X-Master-Key": JSONBIN_API_KEY}
+            )
+            urllib.request.urlopen(req, timeout=5)
+        else:
+            with open("portfolio_history.json", "w") as f:
+                json.dump(history, f, indent=2)
+        print(f"Snapshot saved for {today}")
+    except Exception as e:
+        print(f"Could not save snapshot: {e}")
+
+def get_history_series():
+    """Return sorted list of daily snapshots."""
+    history = load_history()
+    return sorted(history.values(), key=lambda x: x["date"])
+
+# ─────────────────────────────────────────────────────────
 # DATA HELPERS
 # ─────────────────────────────────────────────────────────
 
@@ -272,6 +351,9 @@ def api_summary():
         loss_used_pct = (actual_loss / max_loss_amt * 100) if max_loss_amt > 0 else 0
         stop_investing = actual_loss >= max_loss_amt
 
+        # Auto-save daily snapshot
+        save_snapshot(total_val, total_cost, cash_avail)
+
         # Trade stats
         try:
             trades = cached("trades", kite.trades, ttl=300)
@@ -308,6 +390,7 @@ def api_summary():
             "top_gainers":   [{"ticker": h["tradingsymbol"], "pnl_pct": h["pnl_pct"], "pnl": h["pnl"]} for h in sorted_h[:5]],
             "top_losers":    [{"ticker": h["tradingsymbol"], "pnl_pct": h["pnl_pct"], "pnl": h["pnl"]} for h in sorted_h[-5:][::-1]],
             "trade_stats":   trade_stats,
+            "history":       get_history_series(),
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -359,6 +442,12 @@ def api_refresh():
     session["cache"]    = {}
     session["cache_ts"] = {}
     return jsonify({"ok": True, "message": "Cache cleared"})
+
+
+@app.route("/api/history")
+def api_history():
+    """Return all saved daily portfolio snapshots."""
+    return jsonify(get_history_series())
 
 
 # ─────────────────────────────────────────────────────────
@@ -533,6 +622,8 @@ tbody td:first-child{text-align:left;}
 tbody tr:hover td{background:var(--s2);}
 tbody tr:last-child td{border-bottom:none;}
 .tk{font-weight:700;font-size:0.82rem;}
+.tv-link{color:var(--text);transition:color 0.15s;}
+.tv-link:hover{color:var(--accent);}
 .risk-bar-cell{width:80px;}
 .mini-bar{height:5px;background:var(--s3);border-radius:2px;overflow:hidden;margin-top:3px;}
 .mini-fill{height:100%;border-radius:2px;}
@@ -621,9 +712,12 @@ footer p{font-size:0.65rem;color:var(--muted);}
     <div class="panel">
       <div class="panel-title">
         Portfolio Growth
-        <div class="chart-tabs">
-          <button class="ctab active" onclick="setChartTab(this,'monthly')">Monthly</button>
-          <button class="ctab" onclick="setChartTab(this,'yearly')">Yearly</button>
+        <div style="display:flex;align-items:center;gap:8px">
+          <span id="growthNotice" style="font-size:0.6rem;color:var(--muted);font-weight:400"></span>
+          <div class="chart-tabs">
+            <button class="ctab active" onclick="setChartTab(this,'monthly')">Monthly</button>
+            <button class="ctab" onclick="setChartTab(this,'yearly')">Yearly</button>
+          </div>
         </div>
       </div>
       <canvas id="growthChart" height="160"></canvas>
@@ -631,24 +725,16 @@ footer p{font-size:0.65rem;color:var(--muted);}
   </div>
 
   <!-- ROW 2: STOCK RISK + HOLDINGS TABLE -->
-  <div class="row12">
-    <!-- STOCK RISK METERS -->
-    <div class="panel">
-      <div class="panel-title">Holdings <span id="holdCount"></span></div>
-      <div class="tbl-wrap">
-        <table>
-          <thead><tr>
-            <th>Stock</th><th>Qty</th><th>Avg</th><th>LTP</th><th>Value</th><th>P&L</th><th>Return</th><th>Weight</th><th>Risk Meter</th>
-          </tr></thead>
-          <tbody id="holdTbody"></tbody>
-        </table>
-      </div>
-    </div>
-
-    <!-- PER STOCK RISK BARS -->
-    <div class="panel">
-      <div class="panel-title">Stock Risk Meter <span id="posLimitLbl"></span></div>
-      <div id="stockRiskBars"></div>
+  <!-- HOLDINGS TABLE (full width) -->
+  <div class="panel" style="margin-bottom:14px">
+    <div class="panel-title">Holdings <span id="holdCount"></span></div>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr>
+          <th>Stock</th><th>Qty</th><th>Avg Cost</th><th>LTP</th><th>Value</th><th>P&L ₹</th><th>Return %</th><th>Weight</th><th>Risk</th>
+        </tr></thead>
+        <tbody id="holdTbody"></tbody>
+      </table>
     </div>
   </div>
 
@@ -859,15 +945,28 @@ function renderAll(d) {
   // GROWTH CHART
   renderGrowthChart(d);
 
-  // HOLDINGS TABLE
+  // HOLDINGS TABLE — ticker clicks open TradingView
   document.getElementById('holdCount').textContent = d.holdings.length+' stocks';
   const pl = st.pos_loss_pct;
   document.getElementById('holdTbody').innerHTML = d.holdings.map(h=>{
     const barW   = Math.min(Math.abs(h.pnl_pct) / pl * 100, 100);
     const barClr = h.pnl_pct < -pl ? 'var(--loss)' : h.pnl_pct < -(pl*0.7) ? 'var(--warn)' : h.pnl_pct >= 0 ? 'var(--gain)' : 'var(--warn)';
-    const badge  = h.pnl_pct < -pl ? `<span class="sri-badge badge-bad">BREACH</span>` : h.pnl_pct < -(pl*0.7) ? `<span class="sri-badge badge-warn">WATCH</span>` : `<span class="sri-badge badge-ok">OK</span>`;
+    const badge  = h.pnl_pct < -pl
+      ? `<span class="sri-badge badge-bad">🔴 BREACH</span>`
+      : h.pnl_pct < -(pl*0.7)
+        ? `<span class="sri-badge badge-warn">🟡 WATCH</span>`
+        : `<span class="sri-badge badge-ok">🟢 OK</span>`;
+    // TradingView URL: BSE:SYMBOL or NSE:SYMBOL
+    const exchange = h.exchange || 'NSE';
+    const tvUrl = `https://www.tradingview.com/chart/?symbol=${exchange}%3A${h.tradingsymbol}`;
     return `<tr>
-      <td><span class="tk">${h.tradingsymbol}</span></td>
+      <td>
+        <a href="${tvUrl}" target="_blank" title="Open ${h.tradingsymbol} on TradingView"
+           style="text-decoration:none;display:flex;align-items:center;gap:6px">
+          <span class="tk tv-link">${h.tradingsymbol}</span>
+          <span style="font-size:0.6rem;color:var(--muted);opacity:0.6">↗</span>
+        </a>
+      </td>
       <td>${h.quantity}</td>
       <td>₹${(h.average_price||0).toLocaleString('en-IN',{maximumFractionDigits:0})}</td>
       <td>₹${(h.last_price||0).toLocaleString('en-IN',{maximumFractionDigits:0})}</td>
@@ -875,31 +974,13 @@ function renderAll(d) {
       <td class="${gc(h.pnl)}">${h.pnl>=0?'+':'-'}₹${Math.abs(Math.round(h.pnl)).toLocaleString('en-IN')}</td>
       <td class="${gc(h.pnl_pct)}">${pct(h.pnl_pct)}</td>
       <td class="m">${h.weight_pct}%</td>
-      <td>${badge}<div class="mini-bar"><div class="mini-fill" style="width:${h.pnl_pct>=0?h.weight_pct:barW}%;background:${barClr}"></div></div></td>
-    </tr>`;
-  }).join('');
-
-  // STOCK RISK BARS
-  document.getElementById('posLimitLbl').textContent = 'Limit: '+pl+'% per stock';
-  const sorted = [...d.holdings].sort((a,b)=>a.pnl_pct-b.pnl_pct);
-  document.getElementById('stockRiskBars').innerHTML = sorted.map(h=>{
-    const isLoss   = h.pnl_pct < 0;
-    const used     = isLoss ? Math.min(Math.abs(h.pnl_pct)/pl*100, 100) : 0;
-    const barClr   = h.pnl_pct < -pl ? 'var(--loss)' : h.pnl_pct < -(pl*0.7) ? 'var(--warn)' : 'var(--gain)';
-    const badge    = h.pnl_pct < -pl ? 'badge-bad' : h.pnl_pct < -(pl*0.7) ? 'badge-warn' : 'badge-ok';
-    const badgeTxt = h.pnl_pct < -pl ? '🔴 BREACH' : h.pnl_pct < -(pl*0.7) ? '🟡 WATCH' : '🟢 OK';
-    return `<div class="stock-risk-item">
-      <div class="sri-meta">
-        <span class="sri-name">${h.tradingsymbol}</span>
-        <div style="display:flex;align-items:center;gap:6px">
-          <span class="sri-pct" style="color:${barClr}">${pct(h.pnl_pct)}</span>
-          <span class="sri-badge ${badge}">${badgeTxt}</span>
+      <td>
+        ${badge}
+        <div class="mini-bar" style="margin-top:4px">
+          <div class="mini-fill" style="width:${h.pnl_pct>=0?100:barW}%;background:${barClr}"></div>
         </div>
-      </div>
-      <div class="sri-track">
-        <div class="sri-fill" style="width:${isLoss?used:100}%;background:${barClr}"></div>
-      </div>
-    </div>`;
+      </td>
+    </tr>`;
   }).join('');
 
   // TRADE ANALYTICS
@@ -949,55 +1030,91 @@ function renderAll(d) {
 
 // ── GROWTH CHART ───────────────────────────────────────
 function renderGrowthChart(d) {
-  const p  = d.portfolio;
-  const st = d.settings;
-  const since = new Date(st.invested_since);
-  const now   = new Date();
+  const p       = d.portfolio;
+  const st      = d.settings;
+  const history = d.history || [];   // real saved daily data
 
-  let labels=[], valData=[], costData=[], targetData=[];
+  let labels=[], valData=[], costData=[], targetData=[], drawdownData=[];
 
-  if(chartMode === 'monthly') {
-    let cur = new Date(since.getFullYear(), since.getMonth(), 1);
-    const months = [];
-    while(cur <= now){ months.push(new Date(cur)); cur = new Date(cur.getFullYear(), cur.getMonth()+1, 1); }
-    const n = months.length;
-    labels = months.map(m => m.toLocaleString('en-IN',{month:'short',year:'2-digit'}));
-    months.forEach((_,i)=>{
-      const progress = i/Math.max(n-1,1);
-      const curve    = Math.pow(progress,0.75)*(1+Math.sin(i*1.8)*0.03);
-      costData.push(p.total_cost*(0.3+0.7*progress));
-      valData.push(Math.max(p.total_cost*(0.3+0.7*progress)+(p.total_pl)*curve, p.total_cost*0.3*progress));
-      targetData.push(p.total_cost*Math.pow(1+st.cagr_target/100, i/12));
+  if(history.length >= 2) {
+    // ── USE REAL SAVED DATA ──────────────────────────
+    const raw = chartMode === 'monthly'
+      ? groupByMonth(history)
+      : groupByYear(history);
+
+    labels      = raw.map(r => r.label);
+    valData     = raw.map(r => r.value);
+    costData    = raw.map(r => r.invested);
+    // Target line from first recorded invested value
+    const firstCost = raw[0].invested;
+    targetData  = raw.map((r, i) => {
+      const yrs = chartMode === 'monthly' ? i/12 : i;
+      return firstCost * Math.pow(1 + st.cagr_target/100, yrs);
     });
-    valData[n-1]=p.total_value; costData[n-1]=p.total_cost;
+    // Drawdown — % drop from peak
+    let peak = 0;
+    drawdownData = valData.map(v => {
+      peak = Math.max(peak, v);
+      return peak > 0 ? -((peak - v) / peak * 100) : 0;
+    });
+
   } else {
-    const sy = since.getFullYear(), ey = now.getFullYear();
-    for(let y=sy;y<=ey;y++) labels.push(y===ey?y+'★':String(y));
-    const n = labels.length;
-    labels.forEach((_,i)=>{
-      const progress = i/Math.max(n-1,1);
-      const curve    = Math.pow(progress,0.75);
-      costData.push(p.total_cost*(0.25+0.75*progress));
-      valData.push(Math.max(p.total_cost*(0.25+0.75*progress)+(p.total_pl)*curve*(1+Math.sin(i*2)*0.04), p.total_cost*0.25*progress));
-      targetData.push(p.total_cost*Math.pow(1+st.cagr_target/100, i));
-    });
-    valData[n-1]=p.total_value; costData[n-1]=p.total_cost;
+    // ── NO HISTORY YET — show today's snapshot only + note ──
+    const since = new Date(st.invested_since);
+    const now   = new Date();
+    if(chartMode === 'monthly') {
+      let cur = new Date(since.getFullYear(), since.getMonth(), 1);
+      const months = [];
+      while(cur <= now){ months.push(new Date(cur)); cur = new Date(cur.getFullYear(), cur.getMonth()+1, 1); }
+      const n = months.length;
+      labels = months.map(m => m.toLocaleString('en-IN',{month:'short',year:'2-digit'}));
+      months.forEach((_,i)=>{
+        const progress = i/Math.max(n-1,1);
+        const curve    = Math.pow(progress,0.75)*(1+Math.sin(i*1.8)*0.03);
+        costData.push(p.total_cost*(0.3+0.7*progress));
+        valData.push(Math.max(p.total_cost*(0.3+0.7*progress)+(p.total_pl)*curve, p.total_cost*0.3*progress));
+        targetData.push(p.total_cost*Math.pow(1+st.cagr_target/100, i/12));
+      });
+      valData[n-1]=p.total_value; costData[n-1]=p.total_cost;
+    } else {
+      const sy = since.getFullYear(), ey = now.getFullYear();
+      for(let y=sy;y<=ey;y++) labels.push(y===ey?y+'★':String(y));
+      const n = labels.length;
+      labels.forEach((_,i)=>{
+        const progress = i/Math.max(n-1,1);
+        costData.push(p.total_cost*(0.25+0.75*progress));
+        valData.push(Math.max(p.total_cost*(0.25+0.75*progress)+(p.total_pl)*Math.pow(progress,0.75), p.total_cost*0.25));
+        targetData.push(p.total_cost*Math.pow(1+st.cagr_target/100, i));
+      });
+      valData[n-1]=p.total_value; costData[n-1]=p.total_cost;
+    }
+    drawdownData = [];
   }
 
   const gridClr  = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)';
   const tickClr  = isDark ? '#7b82a8' : '#9090a0';
+  const isReal   = (d.history||[]).length >= 2;
+  const ptRadius = (chartMode==='yearly'||isReal) ? 4 : 0;
+
+  // Show notice if using real data
+  const notice = document.getElementById('growthNotice');
+  if(notice) notice.textContent = isReal
+    ? `Real data · ${(d.history||[]).length} daily snapshots saved`
+    : 'Estimated · real chart builds from tomorrow';
+
+  const datasets = [
+    {label:'Portfolio Value',data:valData,borderColor:'var(--gain)',backgroundColor:'rgba(0,230,118,0.06)',borderWidth:2,fill:true,tension:0.4,pointRadius:ptRadius,pointBackgroundColor:'var(--gain)',pointBorderColor:isDark?'#0f1117':'#f4f6fb',pointBorderWidth:2,pointHoverRadius:5},
+    {label:'Invested',data:costData,borderColor:'#6c63ff',backgroundColor:'transparent',borderWidth:1.5,borderDash:[5,4],tension:0.4,pointRadius:0},
+    {label:`CAGR Target (${st.cagr_target}%)`,data:targetData,borderColor:'rgba(255,82,82,0.5)',backgroundColor:'transparent',borderWidth:1.5,borderDash:[3,5],tension:0.4,pointRadius:0},
+  ];
+  if(drawdownData.length) {
+    datasets.push({label:'Drawdown %',data:drawdownData,borderColor:'rgba(255,171,64,0.7)',backgroundColor:'transparent',borderWidth:1,borderDash:[2,3],tension:0.4,pointRadius:0,yAxisID:'y2'});
+  }
 
   if(growthChart) growthChart.destroy();
   growthChart = new Chart(document.getElementById('growthChart'),{
     type:'line',
-    data:{
-      labels,
-      datasets:[
-        {label:'Portfolio Value',data:valData,borderColor:'var(--gain)',backgroundColor:'rgba(0,230,118,0.06)',borderWidth:2,fill:true,tension:0.4,pointRadius:chartMode==='yearly'?4:0,pointBackgroundColor:'var(--gain)',pointBorderColor:isDark?'#0f1117':'#f4f6fb',pointBorderWidth:2,pointHoverRadius:5},
-        {label:'Invested',data:costData,borderColor:'#6c63ff',backgroundColor:'transparent',borderWidth:1.5,borderDash:[5,4],tension:0.4,pointRadius:0},
-        {label:`Target (${st.cagr_target}%)`,data:targetData,borderColor:'rgba(255,82,82,0.5)',backgroundColor:'transparent',borderWidth:1.5,borderDash:[3,5],tension:0.4,pointRadius:0},
-      ]
-    },
+    data:{ labels, datasets },
     options:{
       responsive:true,maintainAspectRatio:true,
       interaction:{mode:'index',intersect:false},
@@ -1007,10 +1124,37 @@ function renderGrowthChart(d) {
       },
       scales:{
         x:{ticks:{color:tickClr,font:{family:'Inter',size:10},maxTicksLimit:12},grid:{color:gridClr}},
-        y:{ticks:{color:tickClr,font:{family:'Inter',size:10},callback:v=>fmtL(v)},grid:{color:gridClr}}
+        y:{ticks:{color:tickClr,font:{family:'Inter',size:10},callback:v=>fmtL(v)},grid:{color:gridClr}},
+        y2:{position:'right',ticks:{color:'rgba(255,171,64,0.6)',font:{family:'Inter',size:9},callback:v=>v.toFixed(1)+'%'},grid:{drawOnChartArea:false},display:drawdownData.length>0}
       }
     }
   });
+}
+
+// ── GROUP HISTORY BY MONTH/YEAR ───────────────────────
+function groupByMonth(history) {
+  const map = {};
+  history.forEach(h => {
+    const d = new Date(h.date);
+    const k = d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
+    map[k] = h; // last entry of month wins
+  });
+  return Object.entries(map).sort().map(([k,v]) => {
+    const d = new Date(k+'-01');
+    return { label: d.toLocaleString('en-IN',{month:'short',year:'2-digit'}), ...v };
+  });
+}
+
+function groupByYear(history) {
+  const map = {};
+  history.forEach(h => {
+    const y = h.date.slice(0,4);
+    map[y] = h;
+  });
+  const now = new Date().getFullYear();
+  return Object.entries(map).sort().map(([y,v]) => ({
+    label: parseInt(y)===now ? y+'★' : y, ...v
+  }));
 }
 
 function setChartTab(el, mode) {
