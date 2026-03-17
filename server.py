@@ -366,6 +366,16 @@ def api_summary():
             trades      = []
             trade_stats = None
 
+        # Safe load history and stock risks — don't let these crash the whole response
+        try:
+            history_data = get_history_series()
+        except Exception:
+            history_data = []
+        try:
+            stock_risks_data = load_stock_risks()
+        except Exception:
+            stock_risks_data = {}
+
         return jsonify({
             "timestamp":     datetime.now().isoformat(),
             "user_name":     session["user_name"],
@@ -394,11 +404,13 @@ def api_summary():
             "top_gainers":   [{"ticker": h["tradingsymbol"], "pnl_pct": h["pnl_pct"], "pnl": h["pnl"]} for h in sorted_h[:5]],
             "top_losers":    [{"ticker": h["tradingsymbol"], "pnl_pct": h["pnl_pct"], "pnl": h["pnl"]} for h in sorted_h[-5:][::-1]],
             "trade_stats":   trade_stats,
-            "history":       get_history_series(),
-            "stock_risks":   load_stock_risks(),
+            "history":       history_data,
+            "stock_risks":   stock_risks_data,
         })
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        import traceback
+        print("ERROR in /api/summary:", traceback.format_exc())
+        return jsonify({"error": str(e), "detail": traceback.format_exc()}), 500
 
 
 @app.route("/api/holdings")
@@ -447,6 +459,42 @@ def api_refresh():
     session["cache"]    = {}
     session["cache_ts"] = {}
     return jsonify({"ok": True, "message": "Cache cleared"})
+
+
+@app.route("/api/debug")
+def api_debug():
+    """Shows what's working and what's not — visit this URL to diagnose issues."""
+    import traceback
+    result = {
+        "kite_available":   KITE_AVAILABLE,
+        "connected":        bool(session.get("access_token")),
+        "user":             session.get("user_name"),
+        "jsonbin_set":      bool(JSONBIN_BIN_ID and JSONBIN_API_KEY),
+        "cache_keys":       list(session.get("cache", {}).keys()),
+    }
+    if session.get("access_token") and KITE_AVAILABLE:
+        kite.set_access_token(session["access_token"])
+        try:
+            h = kite.holdings()
+            result["holdings_count"] = len(h)
+            result["holdings_ok"] = True
+        except Exception as e:
+            result["holdings_ok"] = False
+            result["holdings_error"] = str(e)
+        try:
+            m = kite.margins()
+            result["margins_ok"] = True
+        except Exception as e:
+            result["margins_ok"] = False
+            result["margins_error"] = str(e)
+        try:
+            history = get_history_series()
+            result["history_count"] = len(history)
+            result["history_ok"] = True
+        except Exception as e:
+            result["history_ok"] = False
+            result["history_error"] = str(e)
+    return jsonify(result)
 
 
 @app.route("/api/history")
@@ -913,10 +961,10 @@ tbody tr:last-child td{border-bottom:none;}
 <!-- ══ PAGE: OVERVIEW ══════════════════════════════════ -->
 <div class="page active" id="page-overview">
   <div class="settings-bar">
-    <div class="sg"><label>CAGR Target %</label><input type="number" id="cagrTarget" value="15" min="1" max="100" onchange="loadData()"></div>
-    <div class="sg"><label>Max Loss %</label><input type="number" id="maxLoss" value="10" min="1" max="50" onchange="loadData()"></div>
-    <div class="sg"><label>Per Stock Loss %</label><input type="number" id="posLoss" value="10" min="1" max="50" onchange="loadData()"></div>
-    <div class="sg"><label>Invested Since</label><input type="date" id="investedSince" value="2023-01-01" onchange="loadData()"></div>
+    <div class="sg"><label>CAGR Target %</label><input type="number" id="cagrTarget" value="15" min="1" max="100" onchange="saveSettings();loadData()"></div>
+    <div class="sg"><label>Max Loss %</label><input type="number" id="maxLoss" value="10" min="1" max="50" onchange="saveSettings();loadData()"></div>
+    <div class="sg"><label>Per Stock Loss %</label><input type="number" id="posLoss" value="10" min="1" max="50" onchange="saveSettings();loadData()"></div>
+    <div class="sg"><label>Invested Since</label><input type="date" id="investedSince" value="2023-01-01" onchange="saveSettings();loadData()"></div>
     <span class="updated-lbl" id="updatedBar"></span>
   </div>
   <div class="alert" id="alertBanner"></div>
@@ -1161,7 +1209,13 @@ async function loadData(){
   const params=new URLSearchParams({cagr_target:document.getElementById('cagrTarget').value,max_loss_pct:document.getElementById('maxLoss').value,pos_loss_pct:document.getElementById('posLoss').value,invested_since:document.getElementById('investedSince').value});
   try{
     const r=await fetch(`/api/summary?${params}`);const d=await r.json();
-    if(d.error){console.error(d.error);return;}
+    if(d.error){
+      console.error('API error:', d.error, d.detail||'');
+      // Still show dashboard with error message
+      document.getElementById('alertBanner').className='alert alert-danger show';
+      document.getElementById('alertBanner').innerHTML=`⚠️ <strong>Data error:</strong> ${d.error}`;
+      return;
+    }
     lastData=d;
     if(d.stock_risks)stockRiskLimits=d.stock_risks;
     renderOverview(d);
@@ -1830,9 +1884,35 @@ async function saveStockRisk(){const v=document.getElementById('riskModalInput')
 document.getElementById('riskModal').addEventListener('click',function(e){if(e.target===this)closeRiskModal();});
 
 // ── INIT ───────────────────────────────────────────────
+// ── SETTINGS PERSISTENCE ──────────────────────────────
+const SETTINGS_KEY = 'folio_settings_v1';
+
+function saveSettings(){
+  const s={
+    cagrTarget:    document.getElementById('cagrTarget').value,
+    maxLoss:       document.getElementById('maxLoss').value,
+    posLoss:       document.getElementById('posLoss').value,
+    investedSince: document.getElementById('investedSince').value,
+  };
+  try{ localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); }catch(e){}
+}
+
+function loadSettings(){
+  try{
+    const raw = localStorage.getItem(SETTINGS_KEY);
+    if(!raw) return;
+    const s = JSON.parse(raw);
+    if(s.cagrTarget)    document.getElementById('cagrTarget').value    = s.cagrTarget;
+    if(s.maxLoss)       document.getElementById('maxLoss').value       = s.maxLoss;
+    if(s.posLoss)       document.getElementById('posLoss').value       = s.posLoss;
+    if(s.investedSince) document.getElementById('investedSince').value = s.investedSince;
+  }catch(e){}
+}
+
 window.addEventListener('load',()=>{
   const params=new URLSearchParams(window.location.search);
   if(params.get('error')){document.getElementById('connectError').textContent='Login error: '+params.get('error');document.getElementById('connectError').style.display='block';history.replaceState({},'','/');}
+  loadSettings();          // restore saved settings first
   loadStockRiskLimits();
   loadJournalFromServer();
   checkAuth();
