@@ -501,15 +501,18 @@ def api_ticker():
                     pe = nse_data.get("pdSymbolPe") or nse_data.get("pe")
                     if pe: entry["pe"] = round(float(pe), 1)
                 except:
-                    # Fallback: use Yahoo Finance summary
+                    # Fallback 1: Yahoo Finance v10
                     try:
-                        yf_url = "https://query2.finance.yahoo.com/v10/finance/quoteSummary/%5ENSEI?modules=summaryDetail&corsDomain=finance.yahoo.com"
-                        yf_req = urllib.request.Request(yf_url, headers={"User-Agent":"Mozilla/5.0","Accept":"application/json"})
+                        yf_url = "https://query2.finance.yahoo.com/v10/finance/quoteSummary/%5ENSEI?modules=summaryDetail"
+                        yf_req = urllib.request.Request(yf_url, headers={"User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64)","Accept":"application/json","Accept-Language":"en-US,en;q=0.9"})
                         with urllib.request.urlopen(yf_req, timeout=6) as pr2:
                             yf_data = json.loads(pr2.read().decode())
                         pe2 = yf_data["quoteSummary"]["result"][0]["summaryDetail"].get("trailingPE",{}).get("raw")
                         if pe2: entry["pe"] = round(pe2, 1)
-                    except: pass
+                    except:
+                        # Fallback 2: hardcoded note so UI shows something
+                        entry["pe"] = None
+                        entry["pe_note"] = "Visit nseindia.com"
             result[name] = entry
         except Exception as e:
             result[name] = {"price": 0, "change": 0, "changePct": 0, "error": str(e)}
@@ -733,16 +736,16 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
 body{background:var(--bg);color:var(--text);font-family:'Inter',sans-serif;font-size:13px;min-height:100vh;overflow-x:hidden;}
 
 /* TICKER STRIP */
-.ticker-strip{background:var(--s1);border-bottom:1px solid var(--border);padding:0 16px;height:28px;display:flex;align-items:center;gap:0;overflow:hidden;position:sticky;top:0;z-index:101;}
-.ticker-item{display:flex;align-items:center;gap:6px;cursor:pointer;text-decoration:none;color:var(--text);transition:opacity 0.15s;white-space:nowrap;}
-.ticker-item:hover{opacity:0.75;}
-.ticker-name{font-size:0.68rem;font-weight:600;color:var(--muted);}
-.ticker-price{font-family:'DM Mono',monospace;font-size:0.72rem;font-weight:500;}
-.ticker-chg{font-family:'DM Mono',monospace;font-size:0.68rem;}
+.ticker-strip{background:var(--s1);border-bottom:1px solid var(--border);padding:0 8px;height:36px;display:flex;align-items:center;gap:0;overflow:hidden;position:sticky;top:0;z-index:101;}
+.ticker-item{display:inline-flex;align-items:center;gap:9px;padding:0 24px;cursor:pointer;text-decoration:none;color:var(--text);transition:opacity 0.15s;white-space:nowrap;height:100%;}
+.ticker-item:hover{opacity:0.75;background:var(--s2);}
+.ticker-name{font-size:0.75rem;font-weight:600;color:var(--muted);letter-spacing:0.3px;}
+.ticker-price{font-family:'DM Mono',monospace;font-size:0.85rem;font-weight:700;}
+.ticker-chg{font-family:'DM Mono',monospace;font-size:0.78rem;font-weight:500;}
 .ticker-sep{color:var(--border);font-size:0.8rem;}
 
 /* HEADER */
-header{background:var(--s1);border-bottom:1px solid var(--border);padding:0 16px;height:44px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:28px;z-index:100;box-shadow:var(--shadow);}
+header{background:var(--s1);border-bottom:1px solid var(--border);padding:0 16px;height:44px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:36px;z-index:100;box-shadow:var(--shadow);}
 .logo{font-size:1rem;font-weight:700;letter-spacing:-0.5px;}
 .logo em{color:var(--accent);font-style:normal;}
 .hright{display:flex;align-items:center;gap:8px;}
@@ -755,7 +758,7 @@ header{background:var(--s1);border-bottom:1px solid var(--border);padding:0 16px
 .theme-btn{width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:0.85rem;cursor:pointer;border:1px solid var(--border);background:var(--s2);}
 
 /* NAV TABS */
-.nav-tabs{background:var(--s1);border-bottom:1px solid var(--border);padding:0 16px;display:flex;gap:2px;overflow-x:auto;position:sticky;top:72px;z-index:99;}
+.nav-tabs{background:var(--s1);border-bottom:1px solid var(--border);padding:0 16px;display:flex;gap:2px;overflow-x:auto;position:sticky;top:80px;z-index:99;}
 .nav-tab{font-size:0.72rem;font-weight:500;padding:10px 14px;border:none;background:none;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap;transition:all 0.15s;}
 .nav-tab:hover{color:var(--text);}
 .nav-tab.active{color:var(--accent);border-bottom-color:var(--accent);}
@@ -901,7 +904,7 @@ tbody tr:last-child td{border-bottom:none;}
 
 /* JOURNAL */
 .journal-layout{display:grid;grid-template-columns:190px 1fr;gap:14px;}
-.journal-sidebar{background:var(--s2);border-radius:8px;padding:12px;border:1px solid var(--border);height:fit-content;align-self:start;position:sticky;top:130px;}
+.journal-sidebar{background:var(--s2);border-radius:8px;padding:12px;border:1px solid var(--border);height:fit-content;align-self:start;position:sticky;top:138px;}
 .journal-mini-cal .mc-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;}
 .journal-mini-cal .mc-title{font-size:0.68rem;font-weight:600;}
 .journal-mini-cal .mc-nav{background:none;border:none;color:var(--muted);cursor:pointer;font-size:0.85rem;padding:1px 4px;}
@@ -1470,23 +1473,26 @@ function renderOverview(d){
     ['Total Capital',fmtL(p.total_capital),'Holdings + Cash',null],
     ['Invested',fmtL(p.total_cost),p.holdings_count+' stocks',null],
     ['P&L',(p.total_pl>=0?'+':'')+fmtL(p.total_pl),pct(p.total_pl_pct),gc(p.total_pl)],
-    ['CAGR',p.cagr+'%','Target: '+st.cagr_target+'%',p.cagr>=st.cagr_target?'g':'w'],
+    ['P&L vs Target',pct(p.total_pl_pct),'Target: '+st.cagr_target+'%',p.total_pl_pct>=st.cagr_target?'g':'w'],
     ['Cash',fmtL(p.cash_available),'Available',null],
   ].map(([l,v,s,c])=>`<div class="card"><div class="card-lbl">${l}</div><div class="card-val ${c||''}">${v}</div>${s?`<div class="card-sub">${s}</div>`:''}</div>`).join('');
 
-  // CAGR PANEL
-  const cagrMet=p.cagr>=st.cagr_target;
-  const cagrW=Math.min(p.cagr/st.cagr_target*100,100);
-  const cagrClr=cagrMet?'var(--gain)':p.cagr>st.cagr_target*0.7?'var(--warn)':'var(--loss)';
+  // PROFIT TARGET PANEL — met when P&L% >= target%
+  const profitMet = p.total_pl_pct >= st.cagr_target;
+  const progW     = Math.min(p.total_pl_pct / Math.max(st.cagr_target,1) * 100, 100);
+  const progClr   = profitMet ? 'var(--gain)' : p.total_pl_pct > st.cagr_target*0.7 ? 'var(--warn)' : p.total_pl_pct > 0 ? 'var(--warn)' : 'var(--loss)';
+  const remaining = (st.cagr_target - p.total_pl_pct).toFixed(1);
   document.getElementById('cagrPanel').innerHTML=`
     <div style="text-align:center;padding:10px 0 8px">
-      <div class="cagr-num" style="color:${cagrClr}">${p.cagr}%</div>
-      <div style="font-size:0.68rem;color:var(--muted);margin-top:4px">${cagrMet?'✓ Target reached!':'Need '+(st.cagr_target-p.total_pl_pct).toFixed(1)+'% more to reach '+st.cagr_target+'% target'}</div>
+      <div class="cagr-num" style="color:${progClr}">${p.total_pl_pct.toFixed(1)}%</div>
+      <div style="font-size:0.68rem;color:var(--muted);margin-top:4px">${profitMet ? '🎯 Profit target reached!' : 'Need '+remaining+'% more to hit '+st.cagr_target+'% target'}</div>
     </div>
-    <div class="cagr-bar-wrap"><div class="cagr-bar-fill" style="width:${cagrW}%;background:${cagrClr}"></div></div>
+    <div class="cagr-bar-wrap"><div class="cagr-bar-fill" style="width:${progW}%;background:${progClr}"></div></div>
     <div class="cagr-stats">
-      <div class="cagr-stat"><div class="val" style="color:${gclr(p.total_pl_pct)}">${pct(p.total_pl_pct)}</div><div class="lbl">Return</div></div>
-      <div class="cagr-stat" style="border:1px solid ${cagrClr}40"><div class="val" style="color:${cagrClr}">${cagrMet?'+'+((p.total_pl_pct-st.cagr_target).toFixed(1))+'%':'-'+((st.cagr_target-p.total_pl_pct).toFixed(1))+'%'}</div><div class="lbl">Gap</div></div>
+      <div class="cagr-stat"><div class="val" style="color:${gclr(p.total_pl_pct)}">${pct(p.total_pl_pct)}</div><div class="lbl">P&L %</div></div>
+      <div class="cagr-stat"><div class="val">${st.cagr_target}%</div><div class="lbl">Target</div></div>
+      <div class="cagr-stat"><div class="val" style="color:${gclr(p.total_pl)}">${p.total_pl>=0?'+':''}${fmtL(p.total_pl)}</div><div class="lbl">P&L ₹</div></div>
+      <div class="cagr-stat" style="border:1px solid ${progClr}40"><div class="val" style="color:${progClr}">${profitMet?'✓ Met':remaining+'% left'}</div><div class="lbl">Gap</div></div>
     </div>`;
 
   // PORTFOLIO RISK
@@ -1564,7 +1570,8 @@ function renderGrowthChart(d){
   // Profit target = total capital × (1 + target%) — the number to beat
   // Uses total capital (invested + cash) so withdrawals are accounted for
   const baseCap      = p.total_capital;   // invested + cash
-  const profitTarget = baseCap * (1 + st.cagr_target/100);
+  // Target = original cost + target% gain (e.g. 100% target = double invested amount)
+  const profitTarget = p.total_cost * (1 + st.cagr_target/100);
 
   if(history.length>=2){
     const raw=chartMode==='monthly'?groupByMonth(history):groupByYear(history);
@@ -1610,7 +1617,8 @@ function renderGrowthChart(d){
   if(notice)notice.textContent=isReal?`${(d.history||[]).length} real days`:'Estimated';
 
   // Color portfolio line: green when above CAGR target, amber when below
-  const aboveTarget = valData[valData.length-1] >= targetData[targetData.length-1];
+  // Green line when portfolio value has crossed the profit target
+  const aboveTarget = p.total_value >= profitTarget;
   const lineColor   = aboveTarget ? 'var(--gain)' : 'var(--warn)';
   const fillColor   = aboveTarget ? 'rgba(0,230,118,0.06)' : 'rgba(255,171,64,0.06)';
 
@@ -1956,21 +1964,40 @@ function renderSectors(d){
 
   // ── SECTOR ROWS LIST ────────────────────────────────
   document.getElementById('sectorRows').innerHTML = sectors.map(([name,v],i)=>{
-    const keyVal  = view==='value'?v.value:view==='invested'?v.invested:v.pl;
+    const keyVal     = view==='value'?v.value:view==='invested'?v.invested:v.pl;
     const pctOfTotal = totalKey ? (keyVal/totalKey*100).toFixed(1) : (v.value/totalVal*100).toFixed(1);
-    const barW    = totalKey ? Math.abs(keyVal/totalKey*100) : (v.value/totalVal*100);
-    return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);cursor:pointer" onclick="showSectorDetail('${name}',null,'${COLORS[i%COLORS.length]}',${totalVal})">
-      <div style="width:10px;height:10px;border-radius:50%;background:${COLORS[i%COLORS.length]};flex-shrink:0"></div>
-      <div style="flex:1;min-width:0">
-        <div style="display:flex;justify-content:space-between;margin-bottom:4px">
-          <span style="font-weight:600;font-size:0.76rem">${name}</span>
-          <span style="font-family:'DM Mono',monospace;font-size:0.7rem;color:${view==='pl'?(v.pl>=0?'var(--gain)':'var(--loss)'):'var(--text)'}">${view==='pl'?(v.pl>=0?'+':'')+fmtL(v.pl):fmtL(keyVal)}</span>
+    const barW       = totalKey ? Math.min(Math.abs(keyVal/totalKey*100),100) : (v.value/totalVal*100);
+    const sortedStocks = [...v.stocks].sort((a,b)=>b.pnl-a.pnl);
+    const stocksHtml = sortedStocks.map(h=>`
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:4px 8px 4px 22px">
+        <a href="https://www.tradingview.com/chart/?symbol=${h.exchange||'NSE'}%3A${h.tradingsymbol}" target="_blank"
+           style="font-size:0.7rem;font-weight:600;color:var(--muted);text-decoration:none">${h.tradingsymbol} ↗</a>
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="font-size:0.68rem;font-family:'DM Mono',monospace;color:${h.pnl>=0?'var(--gain)':'var(--loss)'}">${h.pnl>=0?'+':''}${fmtL(h.pnl)}</span>
+          <span style="font-size:0.65rem;color:${h.pnl_pct>=0?'var(--gain)':'var(--loss)'}">${pct(h.pnl_pct)}</span>
         </div>
-        <div style="height:4px;background:var(--s3);border-radius:2px;overflow:hidden">
-          <div style="height:100%;width:${barW}%;background:${view==='pl'?(v.pl>=0?'var(--gain)':'var(--loss)'):COLORS[i%COLORS.length]};border-radius:2px;transition:width 0.6s ease"></div>
+      </div>`).join('');
+    return `
+    <div style="border-bottom:1px solid var(--border);padding-bottom:6px;margin-bottom:2px">
+      <div style="display:flex;align-items:center;gap:10px;padding:8px 0 4px;cursor:pointer" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'">
+        <div style="width:10px;height:10px;border-radius:50%;background:${COLORS[i%COLORS.length]};flex-shrink:0"></div>
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+            <span style="font-weight:600;font-size:0.76rem">${name}</span>
+            <div style="display:flex;align-items:center;gap:8px">
+              <span style="font-family:'DM Mono',monospace;font-size:0.7rem;color:${v.pl>=0?'var(--gain)':'var(--loss)'}">${v.pl>=0?'+':''}${fmtL(v.pl)}</span>
+              <span style="font-size:0.68rem;color:var(--muted)">${pctOfTotal}%</span>
+              <span style="font-size:0.6rem;color:var(--muted)">▾</span>
+            </div>
+          </div>
+          <div style="height:4px;background:var(--s3);border-radius:2px;overflow:hidden">
+            <div style="height:100%;width:${barW}%;background:${v.pl>=0?'var(--gain)':'var(--loss)'};border-radius:2px;transition:width 0.6s ease"></div>
+          </div>
         </div>
       </div>
-      <div style="font-size:0.7rem;color:var(--muted);flex-shrink:0;width:36px;text-align:right">${pctOfTotal}%</div>
+      <div style="display:none;background:var(--s2);border-radius:6px;padding:4px 0;margin-top:2px">
+        ${stocksHtml}
+      </div>
     </div>`;
   }).join('');
 
