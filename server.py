@@ -466,7 +466,7 @@ def api_ticker():
     """Fetch live index prices from Yahoo Finance — free, no API key needed."""
     symbols = {
         "NIFTY50":   "^NSEI",
-        "MIDCAP100": "^CNXMIDCP100",  # NSE Midcap 100 correct symbol
+        "MIDCAP100": "NIFTY_MIDCAP_100.NS",  # Yahoo Finance symbol for Nifty Midcap 100
         "SMALLCAP":  "^CNXSC",        # NSE Smallcap 100
     }
     result = {}
@@ -486,23 +486,30 @@ def api_ticker():
                 "change":    round(chg, 2),
                 "changePct": round(chgPct, 2),
             }
-            # PE ratio for Nifty 50
+            # PE ratio for Nifty 50 — fetch from NSE India public API
             if name == "NIFTY50":
                 try:
-                    # Use Yahoo Finance v11 quote endpoint — more reliable
-                    pe_url = "https://query1.finance.yahoo.com/v11/finance/quoteSummary/%5ENSEI?modules=defaultKeyStatistics,summaryDetail"
-                    pe_req = urllib.request.Request(pe_url, headers={"User-Agent":"Mozilla/5.0","Accept":"application/json"})
-                    with urllib.request.urlopen(pe_req, timeout=6) as pr:
-                        pe_data = json.loads(pr.read().decode())
-                    res = pe_data["quoteSummary"]["result"][0]
-                    # Try trailingPE from defaultKeyStatistics first
-                    pe = res.get("defaultKeyStatistics",{}).get("trailingEps",{}).get("raw")
-                    pe2 = res.get("summaryDetail",{}).get("trailingPE",{}).get("raw")
-                    if pe2: entry["pe"] = round(pe2, 1)
-                    elif pe and price and pe: entry["pe"] = round(price/pe, 1)
-                except Exception as pe_err:
-                    # Fallback: hardcode approximate PE as note
-                    entry["pe_note"] = "PE N/A"
+                    # NSE India public endpoint (no auth, free)
+                    nse_url = "https://www.nseindia.com/api/equity-meta-info?symbol=NIFTY%2050"
+                    nse_req = urllib.request.Request(nse_url, headers={
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                        "Accept": "application/json",
+                        "Referer": "https://www.nseindia.com/"
+                    })
+                    with urllib.request.urlopen(nse_req, timeout=6) as pr:
+                        nse_data = json.loads(pr.read().decode())
+                    pe = nse_data.get("pdSymbolPe") or nse_data.get("pe")
+                    if pe: entry["pe"] = round(float(pe), 1)
+                except:
+                    # Fallback: use Yahoo Finance summary
+                    try:
+                        yf_url = "https://query2.finance.yahoo.com/v10/finance/quoteSummary/%5ENSEI?modules=summaryDetail&corsDomain=finance.yahoo.com"
+                        yf_req = urllib.request.Request(yf_url, headers={"User-Agent":"Mozilla/5.0","Accept":"application/json"})
+                        with urllib.request.urlopen(yf_req, timeout=6) as pr2:
+                            yf_data = json.loads(pr2.read().decode())
+                        pe2 = yf_data["quoteSummary"]["result"][0]["summaryDetail"].get("trailingPE",{}).get("raw")
+                        if pe2: entry["pe"] = round(pe2, 1)
+                    except: pass
             result[name] = entry
         except Exception as e:
             result[name] = {"price": 0, "change": 0, "changePct": 0, "error": str(e)}
@@ -770,7 +777,7 @@ header{background:var(--s1);border-bottom:1px solid var(--border);padding:0 16px
 #dashboard{display:none;}
 .page{display:none;padding:14px 16px 24px;}
 .page.active{display:block;}
-#page-journal.active{display:flex;flex-direction:column;padding-bottom:0;}
+#page-journal.active{padding-bottom:0;}
 
 /* SETTINGS BAR */
 .settings-bar{background:var(--s1);border:1px solid var(--border);border-radius:8px;padding:11px 14px;margin-bottom:14px;display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;}
@@ -893,8 +900,6 @@ tbody tr:last-child td{border-bottom:none;}
 .sector-details.show{display:block;}
 
 /* JOURNAL */
-#page-journal{display:flex;flex-direction:column;}
-#page-journal .panel{display:flex;flex-direction:column;}
 .journal-layout{display:grid;grid-template-columns:190px 1fr;gap:14px;}
 .journal-sidebar{background:var(--s2);border-radius:8px;padding:12px;border:1px solid var(--border);height:fit-content;align-self:start;position:sticky;top:130px;}
 .journal-mini-cal .mc-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;}
@@ -955,11 +960,6 @@ tbody tr:last-child td{border-bottom:none;}
 
 <!-- TICKER STRIP — PE Ratio first, then indices -->
 <div class="ticker-strip" id="tickerStrip">
-  <!-- PE RATIO — first item -->
-  <div class="ticker-item" style="cursor:default;border-right:1px solid var(--border)">
-    <span class="ticker-name">NIFTY P/E RATIO</span>
-    <span id="pe50" style="font-family:'DM Mono',monospace;font-size:0.72rem;font-weight:600;color:var(--warn)">—</span>
-  </div>
   <!-- NIFTY 50 -->
   <a class="ticker-item" href="https://www.tradingview.com/chart/?symbol=NSE%3ANIFTY" target="_blank" style="border-right:1px solid var(--border)">
     <span class="ticker-name">NIFTY 50</span>
@@ -1439,12 +1439,7 @@ async function updateIndexTickers(){
     setTicker('tn50',  'tc50',  d.NIFTY50);
     setTicker('tnMid', 'tcMid', d.MIDCAP100);
     setTicker('tnSml', 'tcSml', d.SMALLCAP);
-    // PE ratio
-    const peEl = document.getElementById('pe50');
-    if(peEl){
-      if(d.NIFTY50?.pe) peEl.textContent = d.NIFTY50.pe.toFixed(1)+'x';
-      else peEl.textContent = '—';
-    }
+    // PE ratio — only in settings bar now
     const upEl = document.getElementById('tickerUpdated');
     if(upEl) upEl.textContent = 'Updated '+new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
     // Also update PE in settings bar
