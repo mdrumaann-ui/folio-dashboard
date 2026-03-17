@@ -461,6 +461,71 @@ def api_refresh():
     return jsonify({"ok": True, "message": "Cache cleared"})
 
 
+@app.route("/api/nifty-pe")
+def api_nifty_pe():
+    """Fetch Nifty 50 PE ratio — tries multiple free sources."""
+    sources = [
+        # Source 1: NSE India market data API
+        ("https://www.nseindia.com/api/allIndices", "NSE"),
+        # Source 2: Yahoo Finance
+        ("https://query2.finance.yahoo.com/v10/finance/quoteSummary/%5ENSEI?modules=summaryDetail", "Yahoo"),
+    ]
+    
+    # Try NSE India
+    try:
+        session_req = urllib.request.Request(
+            "https://www.nseindia.com",
+            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
+        )
+        import http.cookiejar
+        jar = http.cookiejar.CookieJar()
+        opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+        opener.open(session_req, timeout=5)  # get cookies
+        
+        api_req = urllib.request.Request(
+            "https://www.nseindia.com/api/allIndices",
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "Accept": "application/json, text/plain, */*",
+                "Accept-Language": "en-US,en;q=0.9",
+                "Referer": "https://www.nseindia.com/",
+                "X-Requested-With": "XMLHttpRequest",
+            }
+        )
+        with opener.open(api_req, timeout=8) as r:
+            data = json.loads(r.read().decode())
+        for item in data.get("data", []):
+            if item.get("index") == "NIFTY 50":
+                pe = item.get("pe")
+                pb = item.get("pb")
+                div = item.get("divYield")
+                if pe:
+                    return jsonify({
+                        "pe": round(float(pe), 2),
+                        "pb": round(float(pb), 2) if pb else None,
+                        "div_yield": round(float(div), 2) if div else None,
+                        "source": "NSE India"
+                    })
+    except Exception as e:
+        print(f"NSE PE fetch failed: {e}")
+
+    # Try Yahoo Finance
+    try:
+        req = urllib.request.Request(
+            "https://query2.finance.yahoo.com/v10/finance/quoteSummary/%5ENSEI?modules=summaryDetail",
+            headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
+        )
+        with urllib.request.urlopen(req, timeout=6) as r:
+            data = json.loads(r.read().decode())
+        pe = data["quoteSummary"]["result"][0]["summaryDetail"].get("trailingPE", {}).get("raw")
+        if pe:
+            return jsonify({"pe": round(pe, 2), "source": "Yahoo Finance"})
+    except Exception as e:
+        print(f"Yahoo PE fetch failed: {e}")
+
+    return jsonify({"pe": None, "error": "Could not fetch PE ratio"}), 200
+
+
 @app.route("/api/ticker")
 def api_ticker():
     """Fetch live index prices from Yahoo Finance — free, no API key needed."""
@@ -1257,6 +1322,17 @@ let activeSectors=new Set();
 // NSE Sector Map — comprehensive list of NSE-listed stocks by sector
 // Add your specific holdings here if missing
 const SECTOR_MAP = {
+  // Common Kite API ticker name variants
+  'NATCOPHARM':'Pharma & Healthcare','SUNPHARMA':'Pharma & Healthcare',
+  'ONGC':'Oil & Gas','MRPL':'Oil & Gas','CPCB':'Oil & Gas',
+  'TATAMOTORS':'Automobiles','TATAMTRDVR':'Automobiles',
+  'HDFCBANK':'Financial Services','ICICIBANK':'Financial Services',
+  'WIPRO':'Information Technology','HCLTECH':'Information Technology',
+  'KIRLOSENG':'Capital Goods','KIRLOSBROS':'Capital Goods','KIRLOSKAR':'Capital Goods',
+  'GVT&D':'Capital Goods','GVTD':'Capital Goods',
+  'MBAPL':'Capital Goods',
+  'ANURAS':'FMCG & Consumer',
+  'VENUSREM':'Pharma & Healthcare',
   // Financial Services
   'HDFCBANK':'Financial Services','SBIN':'Financial Services','ICICIBANK':'Financial Services',
   'KOTAKBANK':'Financial Services','AXISBANK':'Financial Services','INDUSINDBK':'Financial Services',
@@ -1264,16 +1340,16 @@ const SECTOR_MAP = {
   'CHOLAFIN':'Financial Services','MUTHOOTFIN':'Financial Services','MANAPPURAM':'Financial Services',
   'LICHSGFIN':'Financial Services','RECLTD':'Financial Services','PFC':'Financial Services',
   // Energy & Oil
-  'RELIANCE':'Energy','ONGC':'Energy','IOC':'Energy','BPCL':'Energy','CPCL':'Energy',
-  'MRPL':'Energy','GAIL':'Energy','OIL':'Energy','PETRONET':'Energy','IGL':'Energy','MGL':'Energy',
-  'HINDPETRO':'Energy','CASTROLIND':'Energy','GSPL':'Energy',
+  'RELIANCE':'Oil & Gas','ONGC':'Oil & Gas','IOC':'Oil & Gas','BPCL':'Oil & Gas','CPCL':'Oil & Gas',
+  'MRPL':'Oil & Gas','GAIL':'Oil & Gas','OIL':'Oil & Gas','PETRONET':'Oil & Gas','IGL':'Oil & Gas','MGL':'Oil & Gas',
+  'HINDPETRO':'Oil & Gas','CASTROLIND':'Oil & Gas','GSPL':'Oil & Gas',
   // Information Technology
   'INFY':'Information Technology','TCS':'Information Technology','WIPRO':'Information Technology',
   'TECHM':'Information Technology','HCLTECH':'Information Technology','LTI':'Information Technology',
   'MPHASIS':'Information Technology','COFORGE':'Information Technology','PERSISTENT':'Information Technology',
   'LTIMINDTREE':'Information Technology','OFSS':'Information Technology',
   // Pharma & Healthcare
-  'SUNPHARMA':'Pharma & Healthcare','CIPLA':'Pharma & Healthcare','NATCO':'Pharma & Healthcare',
+  'SUNPHARMA':'Pharma & Healthcare','CIPLA':'Pharma & Healthcare','NATCO':'Pharma & Healthcare','NATCOPHARM':'Pharma & Healthcare','NATCOPHARMA':'Pharma & Healthcare',
   'DRREDDY':'Pharma & Healthcare','BIOCON':'Pharma & Healthcare','LUPIN':'Pharma & Healthcare',
   'AUROPHARMA':'Pharma & Healthcare','DIVISLAB':'Pharma & Healthcare','TORNTPHARM':'Pharma & Healthcare',
   'ABBOTINDIA':'Pharma & Healthcare','IPCALAB':'Pharma & Healthcare','ALKEM':'Pharma & Healthcare',
@@ -1321,13 +1397,13 @@ function getSector(ticker){
   const t = ticker.toUpperCase().replace(/[&-]/g,'');
   // Pattern match to proper sector names — never return ticker name
   if(/BANK|FIN|CREDIT|LOAN|LEASING|INVEST|ASSET|WEALTH|CAPITAL/.test(t)) return 'Financial Services';
-  if(/PHARMA|DRUG|LAB|BIOTECH|MEDIC|HEALTH|HOSPITAL|DIAGNOS|SURG/.test(t)) return 'Pharma & Healthcare';
+  if(/PHARMA|DRUG|LAB|BIOTECH|MEDIC|HEALTH|HOSPITAL|DIAGNOS|SURG|NATCO/.test(t)) return 'Pharma & Healthcare';
   if(/TECH|INFOSY|SOFT|DIGIT|DATA|CYBER|IT|SYST|COMPUT/.test(t)) return 'Information Technology';
   if(/AUTO|MOTOR|VEHICL|TRACTOR|TYRE|WHEEL|GEAR|PISTON|BRAKE/.test(t)) return 'Automobiles';
   if(/STEEL|METAL|IRON|COPPER|ZINC|ALUM|ALLOY|CAST|MINING|MINERAL/.test(t)) return 'Metals & Mining';
   if(/CEMENT|CONCRET|CONSTRUCT|BUILD|INFRA/.test(t)) return 'Infrastructure';
   if(/POWER|ENERGY|SOLAR|WIND|ELECTR|TRANSMIS|GENERAT/.test(t)) return 'Energy & Power';
-  if(/GAS|OIL|PETRO|REFIN|FUEL|LUBRIC/.test(t)) return 'Oil & Gas';
+  if(/GAS|OIL|PETRO|REFIN|FUEL|LUBRIC|HPCL|BPCL|IOCL/.test(t)) return 'Oil & Gas';
   if(/REAL|PROP|REALTY|ESTATE|HOUS|LAND|DEVEL/.test(t)) return 'Real Estate';
   if(/RETAIL|SHOP|MARKET|STORE|ECOMM|TRADE/.test(t)) return 'Retail & Consumer';
   if(/FOOD|BEVERAGE|DRINK|AGRO|SUGAR|RICE|DAIRY/.test(t)) return 'FMCG & Food';
@@ -1398,6 +1474,27 @@ function showDashboard(name){
   document.getElementById('footerUser').textContent=name||'';
 }
 let tickerTimer=null;
+async function fetchNiftyPE(){
+  try{
+    const r = await fetch('/api/nifty-pe');
+    const d = await r.json();
+    const peDisp = document.getElementById('peDisplay');
+    const peNote = document.getElementById('peNote');
+    if(d.pe && peDisp){
+      peDisp.textContent = d.pe.toFixed(1)+'x';
+      const pe = d.pe;
+      const note = pe > 25 ? '⚠️ Expensive' : pe > 20 ? '~ Fair value' : '✅ Cheap';
+      if(peNote) peNote.textContent = note + (d.pb ? ` · PB ${d.pb}x` : '');
+    } else if(peDisp){
+      peDisp.textContent = '—';
+      if(peNote) peNote.textContent = 'unavailable';
+    }
+  }catch(e){
+    const peNote = document.getElementById('peNote');
+    if(peNote) peNote.textContent = 'unavailable';
+  }
+}
+
 function startAuto(){
   stopAuto();
   autoTimer=setInterval(loadData,60000);
@@ -1449,6 +1546,7 @@ async function updateIndexTickers(){
     setTicker('tnMid', 'tcMid', d.MIDCAP100);
     setTicker('tnSml', 'tcSml', d.SMALLCAP);
     // PE ratio — only in settings bar now
+    fetchNiftyPE();
     const upEl = document.getElementById('tickerUpdated');
     if(upEl) upEl.textContent = 'Updated '+new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
     // Also update PE in settings bar
@@ -1900,6 +1998,7 @@ function renderSectors(d){
   if(!d) return;
   const holdings = d.holdings;
   const sectorMap = {};
+
   holdings.forEach(h=>{
     const sector = getSector(h.tradingsymbol);
     if(!sectorMap[sector]) sectorMap[sector]={value:0,invested:0,pl:0,stocks:[]};
@@ -1911,30 +2010,28 @@ function renderSectors(d){
 
   const viewEl = document.querySelector('input[name="sectorView"]:checked');
   const view   = viewEl ? viewEl.value : 'value';
-  // Always sort by P&L high to low — shows which sectors making most money
-  const sectors = Object.entries(sectorMap).sort((a,b)=>b[1].pl-a[1].pl);
-  const totalVal   = holdings.reduce((s,h)=>s+h.current_value,0);
-  const totalKey   = view==='value'?sectors.reduce((s,[,v])=>s+v.value,0):view==='invested'?sectors.reduce((s,[,v])=>s+v.invested,0):null;
+  const sectors = Object.entries(sectorMap).sort((a,b)=>b[1].pl - a[1].pl);
+  const totalVal     = holdings.reduce((s,h)=>s+h.current_value, 0);
+  const totalInvested= holdings.reduce((s,h)=>s+h.invested_value, 0);
+  const maxBar = view==='pl'
+    ? Math.max(...sectors.map(([,v])=>Math.abs(v.pl)), 1)
+    : view==='invested' ? totalInvested : totalVal;
 
-  // ── PIE CHART ────────────────────────────────────────
+  // PIE CHART
   if(sectorChart) sectorChart.destroy();
-  const chartVals = sectors.map(([,v])=> view==='value'?v.value:view==='invested'?v.invested:Math.abs(v.pl));
-
   sectorChart = new Chart(document.getElementById('sectorChart'),{
     type: 'doughnut',
     data:{
       labels: sectors.map(([n])=>n),
       datasets:[{
-        data: chartVals,
+        data: sectors.map(([,v])=>v.value),
         backgroundColor: COLORS.slice(0, sectors.length),
         borderColor: isDark?'#0f1117':'#f4f6fb',
-        borderWidth: 2,
-        hoverOffset: 8,
+        borderWidth: 2, hoverOffset: 10,
       }]
     },
     options:{
-      responsive: false,
-      cutout: '55%',
+      responsive:true, maintainAspectRatio:true, cutout:'55%',
       plugins:{
         legend:{display:false},
         tooltip:{
@@ -1943,11 +2040,11 @@ function renderSectors(d){
           titleColor:isDark?'#7b82a8':'#9090a0',
           bodyColor:isDark?'#e8eaf6':'#1a1d2e',
           callbacks:{
+            title:ctx=>ctx[0].label,
             label:ctx=>{
               const s=sectors[ctx.dataIndex][1];
               const p=(s.value/totalVal*100).toFixed(1);
-              return [` ${ctx.label}: ${fmtL(ctx.raw)} (${p}%)`,
-                      ` P&L: ${s.pl>=0?'+':''}${fmtL(s.pl)}`];
+              return [` Value: ${fmtL(s.value)} (${p}%)`,` P&L: ${s.pl>=0?'+':''}${fmtL(s.pl)} · ${s.stocks.length} stocks`];
             }
           }
         }
@@ -1958,90 +2055,136 @@ function renderSectors(d){
     }
   });
 
-  // Legend below pie
+  // LEGEND
   const legEl = document.getElementById('sectorLegend');
   if(legEl) legEl.innerHTML = sectors.map(([name,v],i)=>`
-    <div style="display:flex;align-items:center;gap:6px;cursor:pointer;padding:2px 0" onclick="showSectorDetail('${name}',null,'${COLORS[i%COLORS.length]}',${totalVal})">
-      <div style="width:8px;height:8px;border-radius:50%;background:${COLORS[i%COLORS.length]};flex-shrink:0"></div>
-      <span style="font-size:0.65rem;flex:1">${name}</span>
-      <span style="font-size:0.62rem;font-family:'DM Mono',monospace;color:${v.pl>=0?'var(--gain)':'var(--loss)'}">${v.pl>=0?'+':''}${fmtL(v.pl)}</span>
-      <span style="font-size:0.6rem;color:var(--muted);width:32px;text-align:right">${(v.value/totalVal*100).toFixed(0)}%</span>
+    <div style="display:flex;align-items:center;gap:6px;cursor:pointer;padding:3px 4px;border-radius:4px"
+         onmouseover="this.style.background='var(--s3)'" onmouseout="this.style.background=''"
+         onclick="showSectorDetail('${name}',null,'${COLORS[i%COLORS.length]}',${totalVal})">
+      <div style="width:8px;height:8px;border-radius:2px;background:${COLORS[i%COLORS.length]};flex-shrink:0"></div>
+      <span style="font-size:0.68rem;flex:1;font-weight:500">${name}</span>
+      <span style="font-size:0.65rem;font-family:'DM Mono',monospace;color:${v.pl>=0?'var(--gain)':'var(--loss)'}">
+        ${v.pl>=0?'+':''}${fmtL(v.pl)}
+      </span>
+      <span style="font-size:0.6rem;color:var(--muted);width:28px;text-align:right">${(v.value/totalVal*100).toFixed(0)}%</span>
     </div>`).join('');
 
-  // ── SECTOR ROWS LIST ────────────────────────────────
+  // SECTOR ROWS
   document.getElementById('sectorRows').innerHTML = sectors.map(([name,v],i)=>{
-    const keyVal     = view==='value'?v.value:view==='invested'?v.invested:v.pl;
-    const pctOfTotal = totalKey ? (keyVal/totalKey*100).toFixed(1) : (v.value/totalVal*100).toFixed(1);
-    const barW       = totalKey ? Math.min(Math.abs(keyVal/totalKey*100),100) : (v.value/totalVal*100);
+    const dispVal = view==='pl'?v.pl:view==='invested'?v.invested:v.value;
+    const barW    = Math.min(Math.abs(dispVal)/maxBar*100, 100);
+    const barClr  = view==='pl'?(v.pl>=0?'var(--gain)':'var(--loss)'):COLORS[i%COLORS.length];
+    const uid     = 'sec_'+i;
     const sortedStocks = [...v.stocks].sort((a,b)=>b.pnl-a.pnl);
     const stocksHtml = sortedStocks.map(h=>`
-      <div style="display:flex;justify-content:space-between;align-items:center;padding:4px 8px 4px 22px">
-        <a href="https://www.tradingview.com/chart/?symbol=${h.exchange||'NSE'}%3A${h.tradingsymbol}" target="_blank"
-           style="font-size:0.7rem;font-weight:600;color:var(--muted);text-decoration:none">${h.tradingsymbol} ↗</a>
-        <div style="display:flex;align-items:center;gap:8px">
-          <span style="font-size:0.68rem;font-family:'DM Mono',monospace;color:${h.pnl>=0?'var(--gain)':'var(--loss)'}">${h.pnl>=0?'+':''}${fmtL(h.pnl)}</span>
-          <span style="font-size:0.65rem;color:${h.pnl_pct>=0?'var(--gain)':'var(--loss)'}">${pct(h.pnl_pct)}</span>
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 10px 6px 18px;border-bottom:1px solid var(--border)">
+        <a href="https://www.tradingview.com/chart/?symbol=${h.exchange||'NSE'}%3A${h.tradingsymbol}"
+           target="_blank" style="font-size:0.74rem;font-weight:600;color:var(--text);text-decoration:none">${h.tradingsymbol} ↗</a>
+        <div style="display:flex;align-items:center;gap:10px">
+          <span style="font-size:0.68rem;color:var(--muted)">${fmtL(h.current_value)}</span>
+          <span style="font-size:0.74rem;font-weight:600;color:${h.pnl>=0?'var(--gain)':'var(--loss)'};min-width:60px;text-align:right">${h.pnl>=0?'+':''}${fmtL(h.pnl)}</span>
+          <span style="font-size:0.7rem;color:${h.pnl_pct>=0?'var(--gain)':'var(--loss)'};min-width:44px;text-align:right">${pct(h.pnl_pct)}</span>
         </div>
       </div>`).join('');
-    return `
-    <div style="border-bottom:1px solid var(--border);padding-bottom:6px;margin-bottom:2px">
-      <div style="display:flex;align-items:center;gap:10px;padding:8px 0 4px;cursor:pointer" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'">
-        <div style="width:10px;height:10px;border-radius:50%;background:${COLORS[i%COLORS.length]};flex-shrink:0"></div>
+
+    return `<div style="border-bottom:1px solid var(--border)">
+      <div style="display:flex;align-items:center;gap:10px;padding:9px 0 5px;cursor:pointer"
+           onclick="const el=document.getElementById('${uid}');const ar=document.getElementById('${uid}a');el.style.display=el.style.display==='none'?'block':'none';ar.textContent=el.style.display==='none'?'▸':'▾'">
+        <div style="width:10px;height:10px;border-radius:2px;background:${COLORS[i%COLORS.length]};flex-shrink:0"></div>
         <div style="flex:1;min-width:0">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
-            <span style="font-weight:600;font-size:0.76rem">${name}</span>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px">
+            <div style="display:flex;align-items:center;gap:6px">
+              <span style="font-weight:600;font-size:0.78rem">${name}</span>
+              <span style="font-size:0.62rem;color:var(--muted)">${v.stocks.length} stock${v.stocks.length>1?'s':''}</span>
+            </div>
             <div style="display:flex;align-items:center;gap:8px">
-              <span style="font-family:'DM Mono',monospace;font-size:0.7rem;color:${v.pl>=0?'var(--gain)':'var(--loss)'}">${v.pl>=0?'+':''}${fmtL(v.pl)}</span>
-              <span style="font-size:0.68rem;color:var(--muted)">${pctOfTotal}%</span>
-              <span style="font-size:0.6rem;color:var(--muted)">▾</span>
+              <span style="font-family:'DM Mono',monospace;font-size:0.72rem;font-weight:600;color:${v.pl>=0?'var(--gain)':'var(--loss)'}">${v.pl>=0?'+':''}${fmtL(v.pl)}</span>
+              <span style="font-size:0.65rem;color:var(--muted)">${(v.value/totalVal*100).toFixed(1)}%</span>
+              <span id="${uid}a" style="font-size:0.7rem;color:var(--muted)">▸</span>
             </div>
           </div>
           <div style="height:4px;background:var(--s3);border-radius:2px;overflow:hidden">
-            <div style="height:100%;width:${barW}%;background:${v.pl>=0?'var(--gain)':'var(--loss)'};border-radius:2px;transition:width 0.6s ease"></div>
+            <div style="height:100%;width:${barW}%;background:${barClr};border-radius:2px;transition:width 0.6s ease"></div>
           </div>
         </div>
       </div>
-      <div style="display:none;background:var(--s2);border-radius:6px;padding:4px 0;margin-top:2px">
+      <div id="${uid}" style="display:none;background:var(--s2);border-radius:6px;margin-bottom:8px;overflow:hidden;border:1px solid var(--border)">
+        <div style="display:flex;justify-content:space-between;padding:5px 10px;background:var(--s3)">
+          <span style="font-size:0.6rem;font-weight:600;color:var(--muted);text-transform:uppercase">Stock</span>
+          <div style="display:flex;gap:10px">
+            <span style="font-size:0.6rem;color:var(--muted);text-transform:uppercase">Value</span>
+            <span style="font-size:0.6rem;color:var(--muted);text-transform:uppercase;min-width:60px">P&L ₹</span>
+            <span style="font-size:0.6rem;color:var(--muted);text-transform:uppercase;min-width:44px;text-align:right">Return</span>
+          </div>
+        </div>
         ${stocksHtml}
       </div>
     </div>`;
   }).join('');
 
-  // ── SUMMARY ──────────────────────────────────────────
-  const bySec = [...sectors].sort((a,b)=>b[1].pl-a[1].pl);
-  const bestSec  = bySec[0];
-  const worstSec = bySec[bySec.length-1];
+  // SUMMARY
+  const gainSectors = sectors.filter(([,v])=>v.pl>0);
+  const lossSectors = sectors.filter(([,v])=>v.pl<0);
+  const bestSec  = gainSectors[0];
+  const worstSec = lossSectors[lossSectors.length-1];
   document.getElementById('sectorSummary').innerHTML=`
-    <div class="cal-ins-box" style="border-color:rgba(0,230,118,0.3)"><div class="cal-ins-lbl">Top Profit Sector</div><div class="cal-ins-val g">${bestSec?bestSec[0]:'—'}</div><div class="cal-ins-sub g">${bestSec?'+'+fmtL(bestSec[1].pl):''}</div></div>
-    <div class="cal-ins-box" style="border-color:rgba(255,82,82,0.3)"><div class="cal-ins-lbl">Top Loss Sector</div><div class="cal-ins-val l">${worstSec?worstSec[0]:'—'}</div><div class="cal-ins-sub l">${worstSec?fmtL(worstSec[1].pl):''}</div></div>`;
+    <div class="cal-ins-box" style="border-color:rgba(0,230,118,0.3)">
+      <div class="cal-ins-lbl">Top Profit Sector</div>
+      <div class="cal-ins-val g">${bestSec?bestSec[0]:'—'}</div>
+      <div class="cal-ins-sub g">${bestSec?'+'+fmtL(bestSec[1].pl)+' · '+bestSec[1].stocks.length+' stocks':''}</div>
+    </div>
+    <div class="cal-ins-box" style="border-color:rgba(255,82,82,0.3)">
+      <div class="cal-ins-lbl">Top Loss Sector</div>
+      <div class="cal-ins-val l">${worstSec?worstSec[0]:'—'}</div>
+      <div class="cal-ins-sub l">${worstSec?fmtL(worstSec[1].pl)+' · '+worstSec[1].stocks.length+' stocks':''}</div>
+    </div>`;
 
-  window._sectorData = Object.fromEntries(sectors);
+  window._sectorData  = Object.fromEntries(sectors);
   window._sectorTotal = totalVal;
 }
 
-function showSectorDetail(name,data,color,totalVal){
-  const s=data||window._sectorData?.[name];
-  if(!s)return;
-  const pct_=(s.value/totalVal*100).toFixed(1);
+function showSectorDetail(name, data, color, totalVal){
+  const s = data || window._sectorData?.[name];
+  if(!s) return;
+  const pct_ = (s.value/totalVal*100).toFixed(1);
+  const gainers = [...s.stocks].filter(h=>h.pnl>0).sort((a,b)=>b.pnl-a.pnl);
+  const losers  = [...s.stocks].filter(h=>h.pnl<=0).sort((a,b)=>a.pnl-b.pnl);
+  const row = h=>`
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;margin-bottom:3px;
+                border-radius:5px;background:${h.pnl>=0?'var(--gain-bg)':'var(--loss-bg)'};
+                border-left:3px solid ${h.pnl>=0?'var(--gain)':'var(--loss)'}">
+      <a href="https://www.tradingview.com/chart/?symbol=${h.exchange||'NSE'}%3A${h.tradingsymbol}"
+         target="_blank" style="font-weight:700;font-size:0.8rem;color:var(--text);text-decoration:none">
+        ${h.tradingsymbol} ↗
+        <span style="font-size:0.65rem;font-weight:400;color:var(--muted);margin-left:6px">${fmtL(h.current_value)}</span>
+      </a>
+      <div>
+        <span style="font-size:0.8rem;font-weight:700;color:${h.pnl>=0?'var(--gain)':'var(--loss)'}">${h.pnl>=0?'+':''}${fmtL(h.pnl)}</span>
+        <span style="font-size:0.72rem;margin-left:8px;color:${h.pnl_pct>=0?'var(--gain)':'var(--loss)'}">${pct(h.pnl_pct)}</span>
+      </div>
+    </div>`;
+
+  document.getElementById('sectorDetails').style.display='block';
   document.getElementById('sectorDetails').innerHTML=`
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
-      <div style="width:12px;height:12px;border-radius:50%;background:${color}"></div>
-      <div style="font-weight:700;font-size:0.9rem">${name}</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+      <div style="display:flex;align-items:center;gap:8px">
+        <div style="width:10px;height:10px;border-radius:2px;background:${color}"></div>
+        <span style="font-weight:700;font-size:0.95rem">${name}</span>
+        <span style="font-size:0.7rem;color:var(--muted)">${s.stocks.length} stocks · ${pct_}%</span>
+      </div>
+      <button onclick="document.getElementById('sectorDetails').style.display='none'"
+              style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:1rem;padding:0">✕</button>
     </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
-      <div style="background:var(--s3);border-radius:5px;padding:9px;text-align:center"><div style="font-size:0.58rem;color:var(--muted);text-transform:uppercase;margin-bottom:3px">Weightage</div><div style="font-weight:700">${pct_}%</div></div>
-      <div style="background:var(--s3);border-radius:5px;padding:9px;text-align:center"><div style="font-size:0.58rem;color:var(--muted);text-transform:uppercase;margin-bottom:3px">Value</div><div style="font-weight:700">${fmtL(s.value)}</div></div>
-      <div style="background:var(--s3);border-radius:5px;padding:9px;text-align:center"><div style="font-size:0.58rem;color:var(--muted);text-transform:uppercase;margin-bottom:3px">Invested</div><div style="font-weight:700">${fmtL(s.invested)}</div></div>
-      <div style="background:var(--s3);border-radius:5px;padding:9px;text-align:center"><div style="font-size:0.58rem;color:var(--muted);text-transform:uppercase;margin-bottom:3px">P&L</div><div style="font-weight:700;color:${s.pl>=0?'var(--gain)':'var(--loss)'}">${s.pl>=0?'+':''}${fmtL(s.pl)}</div></div>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:16px">
+      ${[['Weight',pct_+'%',''],['Value',fmtL(s.value),''],['Invested',fmtL(s.invested),''],
+         ['P&L',(s.pl>=0?'+':'')+fmtL(s.pl),s.pl>=0?'color:var(--gain)':'color:var(--loss)']].map(([l,v,st])=>
+        `<div style="background:var(--s3);border-radius:6px;padding:9px;text-align:center">
+           <div style="font-size:0.55rem;color:var(--muted);text-transform:uppercase;margin-bottom:3px">${l}</div>
+           <div style="font-weight:700;${st}">${v}</div>
+         </div>`).join('')}
     </div>
-    <div style="font-size:0.68rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:7px">Stocks in this sector</div>
-    ${s.stocks.map(h=>`
-      <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border)">
-        <a href="https://www.tradingview.com/chart/?symbol=${h.exchange||'NSE'}%3A${h.tradingsymbol}" target="_blank" style="font-weight:600;font-size:0.75rem;color:var(--text);text-decoration:none">${h.tradingsymbol} ↗</a>
-        <div style="text-align:right">
-          <div style="font-size:0.72rem;color:${h.pnl>=0?'var(--gain)':'var(--loss)'}">₹${fmtL(h.current_value)} · ${pct(h.pnl_pct)}</div>
-        </div>
-      </div>`).join('')}`;
+    ${gainers.length?`<div style="font-size:0.65rem;font-weight:700;color:var(--gain);text-transform:uppercase;letter-spacing:1px;margin-bottom:7px">▲ Making money (${gainers.length})</div>${gainers.map(row).join('')}`:''}
+    ${losers.length?`<div style="font-size:0.65rem;font-weight:700;color:var(--loss);text-transform:uppercase;letter-spacing:1px;margin:${gainers.length?'14px':0} 0 7px">▼ Losing money (${losers.length})</div>${losers.map(row).join('')}`:''}`;
 }
 
 // ── JOURNAL ────────────────────────────────────────────
@@ -2301,6 +2444,7 @@ window.addEventListener('load',()=>{
   loadSettings();
   loadStockRiskLimits();
   loadJournalFromServer();
+  fetchNiftyPE();
   checkAuth();
 });
 </script>
