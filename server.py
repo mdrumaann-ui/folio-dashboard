@@ -813,24 +813,15 @@ footer p{font-size:0.65rem;color:var(--muted);}
     </div>
   </div>
 
-  <!-- ROW 3: HOLDINGS ANALYTICS -->
+  <!-- ROW 3: PORTFOLIO ANALYTICS -->
   <div class="panel" style="margin-bottom:14px">
-    <div class="panel-title">Holdings Analytics <span style="font-size:0.65rem;color:var(--muted);font-weight:400">per stock performance</span></div>
+    <div class="panel-title">Portfolio Analytics <span style="font-size:0.65rem;color:var(--muted);font-weight:400">holdings performance</span></div>
     <div id="holdingsAnalytics">
       <div style="text-align:center;padding:20px;color:var(--muted);font-size:0.82rem">Loading...</div>
     </div>
   </div>
 
-  <!-- ROW 4: TRADE ANALYTICS -->
-  <div class="panel" style="margin-bottom:14px">
-    <div class="panel-title">Trade Analytics <span id="tradeNote"></span></div>
-    <div id="tradePanel">
-      <div style="text-align:center;padding:30px;color:var(--muted);font-size:0.82rem">
-        Trade data loads from today's executed trades.<br>
-        <span style="font-size:0.72rem">If you haven't traded today, yesterday's data shows here.</span>
-      </div>
-    </div>
-  </div>
+
 
 </div>
 
@@ -915,30 +906,105 @@ document.getElementById('riskModal').addEventListener('click', function(e) {
   if (e.target === this) closeRiskModal();
 });
 
-// ── HOLDINGS ANALYTICS ─────────────────────────────────
+// ── PORTFOLIO ANALYTICS ────────────────────────────────
 function renderHoldingsAnalytics(d) {
-  const holdings = d.holdings;
+  const holdings      = d.holdings;
   const totalInvested = holdings.reduce((s,h) => s + h.invested_value, 0);
   const totalValue    = holdings.reduce((s,h) => s + h.current_value, 0);
   const totalPL       = totalValue - totalInvested;
   const winners       = holdings.filter(h => h.pnl > 0);
   const losers        = holdings.filter(h => h.pnl < 0);
+  const neutral       = holdings.filter(h => h.pnl === 0);
   const best          = [...holdings].sort((a,b) => b.pnl_pct - a.pnl_pct)[0];
   const worst         = [...holdings].sort((a,b) => a.pnl_pct - b.pnl_pct)[0];
   const biggestPos    = [...holdings].sort((a,b) => b.invested_value - a.invested_value)[0];
   const avgReturn     = holdings.reduce((s,h) => s + h.pnl_pct, 0) / holdings.length;
+  const total         = holdings.length;
+
+  // ── WIN RATE from holdings ────────────────────────────
+  // Win rate = stocks in profit / total stocks × 100
+  const winRate     = total > 0 ? (winners.length / total * 100) : 0;
+  const lossRate    = total > 0 ? (losers.length / total * 100) : 0;
+  const winLossRatio= losers.length > 0 ? (winners.length / losers.length).toFixed(2) : '∞';
+
+  // ── PROFIT FACTOR from holdings ───────────────────────
+  // Profit Factor = Total gross profit (sum of winning P&L) / Total gross loss (sum of losing P&L)
+  const grossProfit = winners.reduce((s,h) => s + h.pnl, 0);
+  const grossLoss   = Math.abs(losers.reduce((s,h) => s + h.pnl, 0));
+  const profitFactor= grossLoss > 0 ? (grossProfit / grossLoss) : (grossProfit > 0 ? 999 : 0);
+  const pfVal       = profitFactor >= 999 ? '∞' : profitFactor.toFixed(2);
+  const pfColor     = profitFactor >= 2 ? 'var(--gain)' : profitFactor >= 1 ? 'var(--warn)' : 'var(--loss)';
+  const pfLabel     = profitFactor >= 2 ? 'EXCELLENT' : profitFactor >= 1.5 ? 'GOOD' : profitFactor >= 1 ? 'MARGINAL' : 'LOSING';
+
+  // ── AVG WIN / AVG LOSS ────────────────────────────────
+  const avgWinAmt  = winners.length > 0 ? grossProfit / winners.length : 0;
+  const avgLossAmt = losers.length  > 0 ? grossLoss   / losers.length  : 0;
+  const riskReward = avgLossAmt > 0 ? (avgWinAmt / avgLossAmt).toFixed(2) : '∞';
 
   const el = document.getElementById('holdingsAnalytics');
   el.innerHTML = `
-    <!-- SUMMARY STATS -->
-    <div class="ha-grid">
-      <div class="ha-box">
-        <div class="ha-num" style="color:var(--gain)">${winners.length}</div>
-        <div class="ha-lbl">In Profit</div>
+    <!-- ROW 1: WIN RATE + PROFIT FACTOR side by side big -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px">
+
+      <!-- WIN RATE BOX -->
+      <div style="background:var(--s2);border-radius:10px;padding:20px;border:1px solid var(--border)">
+        <div style="font-size:0.62rem;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Win Rate</div>
+        <div style="font-size:3rem;font-weight:700;letter-spacing:-2px;color:${winRate>=50?'var(--gain)':'var(--loss)'};line-height:1">${winRate.toFixed(0)}%</div>
+        <div style="font-size:0.75rem;color:var(--muted);margin-top:6px">${winners.length} winning · ${losers.length} losing · ${total} total</div>
+
+        <!-- WIN/LOSS BAR -->
+        <div style="display:flex;height:6px;border-radius:3px;overflow:hidden;margin:10px 0 8px">
+          <div style="width:${winRate}%;background:var(--gain);transition:width 0.8s ease"></div>
+          <div style="width:${lossRate}%;background:var(--loss);transition:width 0.8s ease"></div>
+          ${neutral.length>0?`<div style="flex:1;background:var(--s3)"></div>`:''}
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px">
+          <div style="background:var(--gain-bg);border-radius:6px;padding:8px;text-align:center">
+            <div style="font-size:0.85rem;font-weight:700;color:var(--gain)">${fmtL(grossProfit)}</div>
+            <div style="font-size:0.58rem;color:var(--muted);margin-top:2px;letter-spacing:0.5px;text-transform:uppercase">Gross Profit</div>
+          </div>
+          <div style="background:var(--loss-bg);border-radius:6px;padding:8px;text-align:center">
+            <div style="font-size:0.85rem;font-weight:700;color:var(--loss)">-${fmtL(grossLoss)}</div>
+            <div style="font-size:0.58rem;color:var(--muted);margin-top:2px;letter-spacing:0.5px;text-transform:uppercase">Gross Loss</div>
+          </div>
+        </div>
+
+        <div style="margin-top:10px;font-size:0.72rem;color:var(--muted)">
+          Win/Loss Ratio: <strong style="color:var(--text)">${winLossRatio}</strong>
+          &nbsp;·&nbsp; Risk:Reward: <strong style="color:var(--text)">1:${riskReward}</strong>
+        </div>
+        <div style="margin-top:4px;font-size:0.68rem;color:var(--muted)">
+          Avg win: <span style="color:var(--gain)">${fmtL(avgWinAmt)}</span>
+          &nbsp;·&nbsp; Avg loss: <span style="color:var(--loss)">-${fmtL(avgLossAmt)}</span>
+        </div>
       </div>
+
+      <!-- PROFIT FACTOR BOX -->
+      <div style="background:var(--s2);border-radius:10px;padding:20px;border:1px solid ${pfColor}40">
+        <div style="font-size:0.62rem;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Profit Factor</div>
+        <div style="font-size:3rem;font-weight:700;letter-spacing:-2px;color:${pfColor};line-height:1">${pfVal}</div>
+        <div style="font-size:0.75rem;color:${pfColor};margin-top:6px;font-weight:600">${pfLabel}</div>
+        <div style="font-size:0.7rem;color:var(--muted);margin-top:4px">Gross Profit ÷ Gross Loss</div>
+
+        <div style="margin-top:14px;background:var(--s3);border-radius:4px;height:6px;overflow:hidden">
+          <div style="height:100%;width:${Math.min(profitFactor>=999?100:profitFactor/3*100,100)}%;background:${pfColor};border-radius:4px;transition:width 0.8s ease"></div>
+        </div>
+
+        <div style="margin-top:12px;font-size:0.72rem;color:var(--muted);line-height:1.6">
+          <div>• &gt;2.0 = <span style="color:var(--gain)">Excellent</span> — strong portfolio</div>
+          <div>• 1.5–2.0 = <span style="color:var(--gain)">Good</span></div>
+          <div>• 1.0–1.5 = <span style="color:var(--warn)">Marginal</span> — improve selection</div>
+          <div>• &lt;1.0 = <span style="color:var(--loss)">Losing</span> — review holdings</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ROW 2: SUMMARY STATS -->
+    <div class="ha-grid" style="grid-template-columns:repeat(5,1fr)">
       <div class="ha-box">
-        <div class="ha-num" style="color:var(--loss)">${losers.length}</div>
-        <div class="ha-lbl">In Loss</div>
+        <div class="ha-num">${total}</div>
+        <div class="ha-lbl">Total Stocks</div>
       </div>
       <div class="ha-box">
         <div class="ha-num" style="color:${avgReturn>=0?'var(--gain)':'var(--loss)'}">${pct(avgReturn)}</div>
@@ -948,68 +1014,26 @@ function renderHoldingsAnalytics(d) {
         <div class="ha-num">${fmtL(totalInvested)}</div>
         <div class="ha-lbl">Total Invested</div>
       </div>
-    </div>
-
-    <!-- BEST / WORST / BIGGEST -->
-    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:16px">
       <div class="ha-box" style="border-color:rgba(0,230,118,0.3)">
-        <div style="font-size:0.6rem;color:var(--muted);margin-bottom:4px;letter-spacing:1px">BEST PERFORMER</div>
-        <div style="font-weight:700;font-size:0.9rem">${best?.tradingsymbol||'-'}</div>
-        <div style="font-size:0.82rem;color:var(--gain);font-weight:600">${best?pct(best.pnl_pct):'-'}</div>
-        <div style="font-size:0.7rem;color:var(--muted)">${best?'+'+fmtL(best.pnl):''}</div>
+        <div class="ha-num" style="color:var(--gain)">${pct(best?.pnl_pct||0)}</div>
+        <div class="ha-lbl">Best Stock</div>
       </div>
       <div class="ha-box" style="border-color:rgba(255,82,82,0.3)">
-        <div style="font-size:0.6rem;color:var(--muted);margin-bottom:4px;letter-spacing:1px">WORST PERFORMER</div>
-        <div style="font-weight:700;font-size:0.9rem">${worst?.tradingsymbol||'-'}</div>
-        <div style="font-size:0.82rem;color:var(--loss);font-weight:600">${worst?pct(worst.pnl_pct):'-'}</div>
-        <div style="font-size:0.7rem;color:var(--muted)">${worst?fmtL(worst.pnl):''}</div>
-      </div>
-      <div class="ha-box">
-        <div style="font-size:0.6rem;color:var(--muted);margin-bottom:4px;letter-spacing:1px">BIGGEST POSITION</div>
-        <div style="font-weight:700;font-size:0.9rem">${biggestPos?.tradingsymbol||'-'}</div>
-        <div style="font-size:0.82rem;font-weight:600">${biggestPos?fmtL(biggestPos.invested_value):'-'}</div>
-        <div style="font-size:0.7rem;color:var(--muted)">${biggestPos?biggestPos.weight_pct+'% of portfolio':''}</div>
+        <div class="ha-num" style="color:var(--loss)">${pct(worst?.pnl_pct||0)}</div>
+        <div class="ha-lbl">Worst Stock</div>
       </div>
     </div>
 
-    <!-- PER STOCK TABLE -->
-    <div style="overflow-x:auto">
-      <table class="psa-table">
-        <thead><tr>
-          <th>Stock</th>
-          <th>Invested</th>
-          <th>Current</th>
-          <th>Gain/Loss ₹</th>
-          <th>Return %</th>
-          <th>Weight</th>
-          <th>Risk Limit</th>
-        </tr></thead>
-        <tbody>
-          ${[...holdings].sort((a,b)=>b.pnl_pct-a.pnl_pct).map(h => {
-            const customLimit = stockRiskLimits[h.tradingsymbol] || d.settings.pos_loss_pct;
-            const isCustom    = stockRiskLimits[h.tradingsymbol] !== undefined;
-            const exchange    = h.exchange || 'NSE';
-            const tvUrl       = `https://www.tradingview.com/chart/?symbol=${exchange}%3A${h.tradingsymbol}`;
-            return `<tr>
-              <td>
-                <a href="${tvUrl}" target="_blank" style="text-decoration:none">
-                  <span class="tv-link" style="font-weight:700">${h.tradingsymbol}</span>
-                  <span style="font-size:0.55rem;color:var(--muted)"> ↗</span>
-                </a>
-              </td>
-              <td>₹${Math.round(h.invested_value).toLocaleString('en-IN')}</td>
-              <td>₹${Math.round(h.current_value).toLocaleString('en-IN')}</td>
-              <td class="${gc(h.pnl)}">${h.pnl>=0?'+':'-'}₹${Math.abs(Math.round(h.pnl)).toLocaleString('en-IN')}</td>
-              <td class="${gc(h.pnl_pct)}" style="font-weight:600">${pct(h.pnl_pct)}</td>
-              <td class="m">${h.weight_pct}%</td>
-              <td>
-                <span style="font-family:'DM Mono',monospace;font-size:0.75rem;color:${isCustom?'var(--accent)':'var(--muted)'}">${customLimit}%${isCustom?' (custom)':''}</span>
-                <button class="risk-edit-btn" onclick="openRiskModal('${h.tradingsymbol}',${customLimit})">✎</button>
-              </td>
-            </tr>`;
-          }).join('')}
-        </tbody>
-      </table>
+    <!-- ROW 3: BIGGEST POSITION -->
+    <div style="margin-top:12px;background:var(--s2);border-radius:8px;padding:12px 16px;display:flex;justify-content:space-between;align-items:center;border:1px solid var(--border)">
+      <div>
+        <div style="font-size:0.6rem;color:var(--muted);letter-spacing:1px;text-transform:uppercase;margin-bottom:3px">Biggest Position</div>
+        <div style="font-weight:700">${biggestPos?.tradingsymbol||'-'} · ${fmtL(biggestPos?.invested_value||0)} · ${biggestPos?.weight_pct||0}% of portfolio</div>
+      </div>
+      <div style="text-align:right">
+        <div style="font-size:0.6rem;color:var(--muted);letter-spacing:1px;text-transform:uppercase;margin-bottom:3px">Return</div>
+        <div style="font-weight:700;color:${gc(best?.pnl_pct||0)==='g'?'var(--gain)':'var(--loss)'}">${pct(biggestPos?.pnl_pct||0)}</div>
+      </div>
     </div>`;
 }
 
@@ -1303,7 +1327,7 @@ function renderGrowthChart(d) {
 
     labels      = raw.map(r => r.label);
     valData     = raw.map(r => r.value);
-    costData    = raw.map(r => r.invested);
+    costData    = raw.map(r => r.total_capital);  // total capital = invested + cash
     // Target line from first recorded invested value
     const firstCost = raw[0].invested;
     targetData  = raw.map((r, i) => {
@@ -1330,22 +1354,24 @@ function renderGrowthChart(d) {
       months.forEach((_,i)=>{
         const progress = i/Math.max(n-1,1);
         const curve    = Math.pow(progress,0.75)*(1+Math.sin(i*1.8)*0.03);
-        costData.push(p.total_cost*(0.3+0.7*progress));
-        valData.push(Math.max(p.total_cost*(0.3+0.7*progress)+(p.total_pl)*curve, p.total_cost*0.3*progress));
-        targetData.push(p.total_cost*Math.pow(1+st.cagr_target/100, i/12));
+        const tc1 = p.total_capital*(0.3+0.7*progress);
+        costData.push(tc1);
+        valData.push(Math.max(tc1+(p.total_pl)*curve, tc1*0.85));
+        targetData.push(p.total_capital*Math.pow(1+st.cagr_target/100, i/12));
       });
-      valData[n-1]=p.total_value; costData[n-1]=p.total_cost;
+      valData[n-1]=p.total_value; costData[n-1]=p.total_capital;
     } else {
       const sy = since.getFullYear(), ey = now.getFullYear();
       for(let y=sy;y<=ey;y++) labels.push(y===ey?y+'★':String(y));
       const n = labels.length;
       labels.forEach((_,i)=>{
         const progress = i/Math.max(n-1,1);
-        costData.push(p.total_cost*(0.25+0.75*progress));
-        valData.push(Math.max(p.total_cost*(0.25+0.75*progress)+(p.total_pl)*Math.pow(progress,0.75), p.total_cost*0.25));
-        targetData.push(p.total_cost*Math.pow(1+st.cagr_target/100, i));
+        const tc2 = p.total_capital*(0.25+0.75*progress);
+        costData.push(tc2);
+        valData.push(Math.max(tc2+(p.total_pl)*Math.pow(progress,0.75), tc2*0.8));
+        targetData.push(p.total_capital*Math.pow(1+st.cagr_target/100, i));
       });
-      valData[n-1]=p.total_value; costData[n-1]=p.total_cost;
+      valData[n-1]=p.total_value; costData[n-1]=p.total_capital;
     }
     drawdownData = [];
   }
@@ -1363,7 +1389,7 @@ function renderGrowthChart(d) {
 
   const datasets = [
     {label:'Portfolio Value',data:valData,borderColor:'var(--gain)',backgroundColor:'rgba(0,230,118,0.06)',borderWidth:2,fill:true,tension:0.4,pointRadius:ptRadius,pointBackgroundColor:'var(--gain)',pointBorderColor:isDark?'#0f1117':'#f4f6fb',pointBorderWidth:2,pointHoverRadius:5},
-    {label:'Invested',data:costData,borderColor:'#6c63ff',backgroundColor:'transparent',borderWidth:1.5,borderDash:[5,4],tension:0.4,pointRadius:0},
+    {label:'Total Capital (invested+cash)',data:costData,borderColor:'#6c63ff',backgroundColor:'transparent',borderWidth:1.5,borderDash:[5,4],tension:0.4,pointRadius:0},
     {label:`CAGR Target (${st.cagr_target}%)`,data:targetData,borderColor:'rgba(255,82,82,0.5)',backgroundColor:'transparent',borderWidth:1.5,borderDash:[3,5],tension:0.4,pointRadius:0},
   ];
   if(drawdownData.length) {
