@@ -476,18 +476,29 @@ def api_ticker():
         try:
             url = f"https://query1.finance.yahoo.com/v8/finance/chart/{sym}?interval=1m&range=1d"
             req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-            with urllib.request.urlopen(req, timeout=5) as r:
+            with urllib.request.urlopen(req, timeout=6) as r:
                 data = json.loads(r.read().decode())
             meta  = data["chart"]["result"][0]["meta"]
             price = meta.get("regularMarketPrice", 0)
             prev  = meta.get("chartPreviousClose", price)
             chg   = price - prev
             chgPct= (chg / prev * 100) if prev else 0
-            result[name] = {
-                "price":   round(price, 2),
-                "change":  round(chg, 2),
+            entry = {
+                "price":     round(price, 2),
+                "change":    round(chg, 2),
                 "changePct": round(chgPct, 2),
             }
+            # PE ratio for Nifty 50 via summary endpoint
+            if name == "NIFTY50":
+                try:
+                    pe_url = "https://query1.finance.yahoo.com/v10/finance/quoteSummary/%5ENSEI?modules=summaryDetail"
+                    pe_req = urllib.request.Request(pe_url, headers={"User-Agent": "Mozilla/5.0"})
+                    with urllib.request.urlopen(pe_req, timeout=5) as pr:
+                        pe_data = json.loads(pr.read().decode())
+                    pe = pe_data["quoteSummary"]["result"][0]["summaryDetail"].get("trailingPE", {}).get("raw", None)
+                    if pe: entry["pe"] = round(pe, 1)
+                except: pass
+            result[name] = entry
         except Exception as e:
             result[name] = {"price": 0, "change": 0, "changePct": 0, "error": str(e)}
     return jsonify(result)
@@ -928,63 +939,25 @@ tbody tr:last-child td{border-bottom:none;}
 </head>
 <body>
 
-<!-- TICKER STRIP — continuous scroll -->
+<!-- TICKER STRIP — static 3 indices + PE ratio -->
 <div class="ticker-strip" id="tickerStrip">
-  <div class="ticker-track" id="tickerTrack">
-    <!-- Set 1 -->
-    <a class="ticker-item" href="https://www.tradingview.com/chart/?symbol=NSE%3ANIFTY" target="_blank">
-      <span class="ticker-name">NIFTY 50</span>
-      <span class="ticker-price" id="tn50">—</span>
-      <span class="ticker-chg" id="tc50" style="color:var(--muted)">Live prices need paid plan</span>
-    </a>
-    <a class="ticker-item" href="https://www.tradingview.com/chart/?symbol=NSE%3AMIDCPNIFTY" target="_blank">
-      <span class="ticker-name">MIDCAP 100</span>
-      <span class="ticker-price" id="tnMid">—</span>
-      <span class="ticker-chg" id="tcMid"></span>
-    </a>
-    <a class="ticker-item" href="https://www.tradingview.com/chart/?symbol=NSE%3ANIFTYSMLCAP100" target="_blank">
-      <span class="ticker-name">SMALLCAP 100</span>
-      <span class="ticker-price" id="tnSml">—</span>
-      <span class="ticker-chg" id="tcSml"></span>
-    </a>
-    <a class="ticker-item" href="https://www.tradingview.com/chart/?symbol=NSE%3ABANKNIFTY" target="_blank">
-      <span class="ticker-name">BANK NIFTY</span>
-      <span class="ticker-price">—</span>
-    </a>
-    <a class="ticker-item" href="https://www.tradingview.com/chart/?symbol=NSE%3ANIFTYNXT50" target="_blank">
-      <span class="ticker-name">NIFTY NEXT 50</span>
-      <span class="ticker-price">—</span>
-    </a>
-    <a class="ticker-item" href="https://www.tradingview.com/chart/?symbol=BSE%3ASENSEX" target="_blank">
-      <span class="ticker-name">SENSEX</span>
-      <span class="ticker-price">—</span>
-    </a>
-    <!-- Set 2 — duplicate for seamless loop -->
-    <a class="ticker-item" href="https://www.tradingview.com/chart/?symbol=NSE%3ANIFTY" target="_blank">
-      <span class="ticker-name">NIFTY 50</span>
-      <span class="ticker-price">—</span>
-    </a>
-    <a class="ticker-item" href="https://www.tradingview.com/chart/?symbol=NSE%3AMIDCPNIFTY" target="_blank">
-      <span class="ticker-name">MIDCAP 100</span>
-      <span class="ticker-price">—</span>
-    </a>
-    <a class="ticker-item" href="https://www.tradingview.com/chart/?symbol=NSE%3ANIFTYSMLCAP100" target="_blank">
-      <span class="ticker-name">SMALLCAP 100</span>
-      <span class="ticker-price">—</span>
-    </a>
-    <a class="ticker-item" href="https://www.tradingview.com/chart/?symbol=NSE%3ABANKNIFTY" target="_blank">
-      <span class="ticker-name">BANK NIFTY</span>
-      <span class="ticker-price">—</span>
-    </a>
-    <a class="ticker-item" href="https://www.tradingview.com/chart/?symbol=NSE%3ANIFTYNXT50" target="_blank">
-      <span class="ticker-name">NIFTY NEXT 50</span>
-      <span class="ticker-price">—</span>
-    </a>
-    <a class="ticker-item" href="https://www.tradingview.com/chart/?symbol=BSE%3ASENSEX" target="_blank">
-      <span class="ticker-name">SENSEX</span>
-      <span class="ticker-price">—</span>
-    </a>
-  </div>
+  <a class="ticker-item" href="https://www.tradingview.com/chart/?symbol=NSE%3ANIFTY" target="_blank">
+    <span class="ticker-name">NIFTY 50</span>
+    <span class="ticker-price" id="tn50">—</span>
+    <span class="ticker-chg" id="tc50"></span>
+    <span class="ticker-pe" id="pe50" title="Nifty 50 P/E Ratio">PE —</span>
+  </a>
+  <a class="ticker-item" href="https://www.tradingview.com/chart/?symbol=NSE%3AMIDCPNIFTY" target="_blank">
+    <span class="ticker-name">NIFTY MIDCAP 100</span>
+    <span class="ticker-price" id="tnMid">—</span>
+    <span class="ticker-chg" id="tcMid"></span>
+  </a>
+  <a class="ticker-item" href="https://www.tradingview.com/chart/?symbol=NSE%3ANIFTYSMLCAP100" target="_blank">
+    <span class="ticker-name">NIFTY SMALLCAP 100</span>
+    <span class="ticker-price" id="tnSml">—</span>
+    <span class="ticker-chg" id="tcSml"></span>
+  </a>
+  <span style="margin-left:auto;font-size:0.58rem;color:var(--muted);padding-right:8px" id="tickerUpdated"></span>
 </div>
 
 <header>
@@ -1050,7 +1023,7 @@ tbody tr:last-child td{border-bottom:none;}
     </div>
     <div class="panel" style="margin-bottom:0">
       <div class="panel-title">
-        Growth
+        Portfolio Growth Tracker
         <div style="display:flex;align-items:center;gap:6px">
           <span id="growthNotice" style="font-size:0.58rem;color:var(--muted);font-weight:400"></span>
           <div class="chart-tabs">
@@ -1091,10 +1064,11 @@ tbody tr:last-child td{border-bottom:none;}
   <div class="panel">
     <div class="panel-title">
       P&L Heatmap Calendar
-      <div style="display:flex;align-items:center;gap:8px">
+      <div style="display:flex;align-items:center;gap:6px">
         <button onclick="calNavYear(-1)" style="background:none;border:1px solid var(--border);color:var(--muted);padding:3px 8px;border-radius:4px;cursor:pointer;font-size:0.8rem">‹</button>
         <span id="calYearLabel" style="font-size:0.72rem;font-weight:600;min-width:40px;text-align:center"></span>
         <button onclick="calNavYear(1)" style="background:none;border:1px solid var(--border);color:var(--muted);padding:3px 8px;border-radius:4px;cursor:pointer;font-size:0.8rem">›</button>
+        <button onclick="calCurrentYear=new Date().getFullYear();renderCalendar()" style="background:var(--accent);color:#fff;border:none;padding:3px 10px;border-radius:4px;cursor:pointer;font-size:0.65rem;font-weight:600">Today</button>
       </div>
     </div>
     <!-- FULL YEAR HEATMAP — all 12 months side by side like the reference -->
@@ -1274,17 +1248,26 @@ const SECTOR_MAP = {
 // Smart sector guesser for unknown tickers
 function getSector(ticker){
   if(SECTOR_MAP[ticker]) return SECTOR_MAP[ticker];
-  // Try to guess from name patterns
-  const t=ticker.toUpperCase();
-  if(t.includes('BANK')||t.includes('FIN')||t.includes('NBFC')) return 'Financial Services';
-  if(t.includes('PHARMA')||t.includes('CHEM')||t.includes('LAB')) return 'Pharma & Healthcare';
-  if(t.includes('TECH')||t.includes('INFO')||t.includes('SOFT')) return 'Information Technology';
-  if(t.includes('AUTO')||t.includes('MOTOR')||t.includes('TYRE')) return 'Automobiles';
-  if(t.includes('STEEL')||t.includes('METAL')||t.includes('ALUM')) return 'Metals';
-  if(t.includes('CEMENT')||t.includes('CEM')) return 'Cement';
-  if(t.includes('POWER')||t.includes('ENERGY')||t.includes('GAS')) return 'Energy';
-  if(t.includes('REAL')||t.includes('PROP')||t.includes('REALTY')) return 'Real Estate';
-  return ticker; // use ticker name as sector if completely unknown — not "Others"
+  const t = ticker.toUpperCase().replace(/[&-]/g,'');
+  // Pattern match to proper sector names — never return ticker name
+  if(/BANK|FIN|CREDIT|LOAN|LEASING|INVEST|ASSET|WEALTH|CAPITAL/.test(t)) return 'Financial Services';
+  if(/PHARMA|DRUG|LAB|BIOTECH|MEDIC|HEALTH|HOSPITAL|DIAGNOS|SURG/.test(t)) return 'Pharma & Healthcare';
+  if(/TECH|INFOSY|SOFT|DIGIT|DATA|CYBER|IT|SYST|COMPUT/.test(t)) return 'Information Technology';
+  if(/AUTO|MOTOR|VEHICL|TRACTOR|TYRE|WHEEL|GEAR|PISTON|BRAKE/.test(t)) return 'Automobiles';
+  if(/STEEL|METAL|IRON|COPPER|ZINC|ALUM|ALLOY|CAST|MINING|MINERAL/.test(t)) return 'Metals & Mining';
+  if(/CEMENT|CONCRET|CONSTRUCT|BUILD|INFRA/.test(t)) return 'Infrastructure';
+  if(/POWER|ENERGY|SOLAR|WIND|ELECTR|TRANSMIS|GENERAT/.test(t)) return 'Energy & Power';
+  if(/GAS|OIL|PETRO|REFIN|FUEL|LUBRIC/.test(t)) return 'Oil & Gas';
+  if(/REAL|PROP|REALTY|ESTATE|HOUS|LAND|DEVEL/.test(t)) return 'Real Estate';
+  if(/RETAIL|SHOP|MARKET|STORE|ECOMM|TRADE/.test(t)) return 'Retail & Consumer';
+  if(/FOOD|BEVERAGE|DRINK|AGRO|SUGAR|RICE|DAIRY/.test(t)) return 'FMCG & Food';
+  if(/CHEM|FERTIL|PESTICI|PAINT|COAT|PLASTIC/.test(t)) return 'Chemicals';
+  if(/TELECOM|MOBILE|NETWORK|BROADBAND|FIBRE/.test(t)) return 'Telecom';
+  if(/INSUR|LIFE|GENERAL/.test(t)) return 'Insurance';
+  if(/MEDIA|NEWS|PUBLISH|FILM|ENTERTAIN/.test(t)) return 'Media & Entertainment';
+  if(/HOTEL|RESORT|TRAVEL|TOUR|HOSPITALITY/.test(t)) return 'Hospitality';
+  if(/TEXTILE|FABRIC|GARMENT|COTTON|YARN/.test(t)) return 'Textiles';
+  return 'Diversified'; // fallback is "Diversified" not the ticker name
 }
 
 // ── FORMAT ─────────────────────────────────────────────
@@ -1363,11 +1346,9 @@ async function loadData(){
     lastData=d;
     if(d.stock_risks)stockRiskLimits=d.stock_risks;
     renderOverview(d);
-    updateIndexTickers();
     const t=new Date().toLocaleTimeString('en-IN');
     document.getElementById('updatedBar').textContent='Updated '+t;
     document.getElementById('updatedLbl').textContent=t;
-    updateIndexTickers(d);
   }catch(e){console.error(e);}
 }
 
@@ -1376,32 +1357,26 @@ async function updateIndexTickers(){
   try{
     const r = await fetch('/api/ticker');
     const d = await r.json();
-    // Update all ticker items in the scrolling strip
-    const items = document.querySelectorAll('.ticker-item');
-    const MAP = {
-      'NIFTY 50':     d.NIFTY50,
-      'MIDCAP 100':   d.MIDCAP100,
-      'SMALLCAP 100': d.SMALLCAP,
-      'BANK NIFTY':   d.BANKNIFTY,
-      'SENSEX':       d.SENSEX,
-      'NIFTY NEXT 50':null,
-    };
-    items.forEach(item=>{
-      const nameEl  = item.querySelector('.ticker-name');
-      const priceEl = item.querySelector('.ticker-price');
-      const chgEl   = item.querySelector('.ticker-chg');
-      if(!nameEl||!priceEl) return;
-      const name = nameEl.textContent.trim();
-      const data = MAP[name];
+    function setTicker(priceId, chgId, data){
+      const pe = document.getElementById('pe50');
+      const priceEl = document.getElementById(priceId);
+      const chgEl   = document.getElementById(chgId);
       if(!data||!data.price) return;
-      priceEl.textContent = data.price.toLocaleString('en-IN');
+      if(priceEl) priceEl.textContent = data.price.toLocaleString('en-IN',{maximumFractionDigits:2});
       if(chgEl){
         const up = data.change >= 0;
-        chgEl.textContent = `${up?'▲':'▼'} ${Math.abs(data.changePct).toFixed(2)}%`;
+        chgEl.textContent = (up?'▲ +':'▼ ')+Math.abs(data.changePct).toFixed(2)+'%';
         chgEl.style.color = up ? 'var(--gain)' : 'var(--loss)';
-        chgEl.style.fontSize = '0.65rem';
       }
-    });
+    }
+    setTicker('tn50',  'tc50',  d.NIFTY50);
+    setTicker('tnMid', 'tcMid', d.MIDCAP100);
+    setTicker('tnSml', 'tcSml', d.SMALLCAP);
+    // PE ratio
+    const peEl = document.getElementById('pe50');
+    if(peEl && d.NIFTY50?.pe) peEl.textContent = 'PE '+d.NIFTY50.pe.toFixed(1);
+    const upEl = document.getElementById('tickerUpdated');
+    if(upEl) upEl.textContent = 'Updated '+new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
   }catch(e){ console.log('Ticker fetch failed:', e); }
 }
 
@@ -1544,10 +1519,14 @@ function renderGrowthChart(d){
   const notice=document.getElementById('growthNotice');
   if(notice)notice.textContent=isReal?`${(d.history||[]).length} real days`:'Estimated';
 
+  // Color portfolio line: green when above CAGR target, amber when below
+  const aboveTarget = valData[valData.length-1] >= targetData[targetData.length-1];
+  const lineColor   = aboveTarget ? 'var(--gain)' : 'var(--warn)';
+  const fillColor   = aboveTarget ? 'rgba(0,230,118,0.06)' : 'rgba(255,171,64,0.06)';
+
   const datasets=[
-    {label:'Portfolio Value',data:valData,borderColor:'var(--gain)',backgroundColor:'rgba(0,230,118,0.05)',borderWidth:2,fill:true,tension:0.4,pointRadius:ptR,pointBackgroundColor:'var(--gain)',pointBorderColor:isDark?'#0f1117':'#f4f6fb',pointBorderWidth:2,pointHoverRadius:4},
-    {label:'Total Capital',data:costData,borderColor:'#6c63ff',backgroundColor:'transparent',borderWidth:1.5,borderDash:[5,4],tension:0.4,pointRadius:0},
-    {label:`Target (${st.cagr_target}%)`,data:targetData,borderColor:'rgba(255,82,82,0.4)',backgroundColor:'transparent',borderWidth:1.5,borderDash:[3,5],tension:0.4,pointRadius:0},
+    {label:'Portfolio Value',data:valData,borderColor:lineColor,backgroundColor:fillColor,borderWidth:2.5,fill:true,tension:0.4,pointRadius:ptR,pointBackgroundColor:lineColor,pointBorderColor:isDark?'#0f1117':'#f4f6fb',pointBorderWidth:2,pointHoverRadius:5},
+    {label:`CAGR Target ${st.cagr_target}%`,data:targetData,borderColor:'rgba(255,82,82,0.5)',backgroundColor:'transparent',borderWidth:1.5,borderDash:[4,4],tension:0.4,pointRadius:0},
   ];
   if(drawdownData.length)datasets.push({label:'Drawdown %',data:drawdownData,borderColor:'rgba(255,171,64,0.6)',backgroundColor:'transparent',borderWidth:1,borderDash:[2,3],tension:0.4,pointRadius:0,yAxisID:'y2'});
 
@@ -1729,6 +1708,14 @@ function renderCalendar(){
   const year    = calCurrentYear;
   const today   = new Date();
   document.getElementById('calYearLabel').textContent = year;
+
+  // If no history yet, show today's P&L from live data
+  if(lastData && history.length === 0){
+    const todayStr = today.toISOString().split('T')[0];
+    const p = lastData.portfolio;
+    // Use total P&L as today's indicator
+    if(p.total_pl !== 0) plMap[todayStr] = {pl: p.total_pl, value: p.total_value};
+  }
 
   // Calculate max abs P&L for intensity scaling
   const pls = Object.values(plMap).map(v=>Math.abs(v.pl)).filter(v=>v>0);
@@ -1988,11 +1975,14 @@ function buildMiniCal(year,month){
   const monthName=new Date(year,month,1).toLocaleString('en-IN',{month:'short'});
   let html=`
   <div class="mc-header">
-    <button class="mc-nav" onclick="miniCalNav(-12)" title="Previous year" style="font-size:0.65rem;padding:2px 4px">«</button>
-    <button class="mc-nav" onclick="miniCalNav(-1)" title="Previous month">‹</button>
-    <div class="mc-title">${monthName} ${year}</div>
+    <button class="mc-nav" onclick="miniCalNav(-12)" title="Prev year" style="font-size:0.6rem;padding:1px 4px">«</button>
+    <button class="mc-nav" onclick="miniCalNav(-1)" title="Prev month">‹</button>
+    <div class="mc-title" style="font-size:0.68rem">${monthName} ${year}</div>
     <button class="mc-nav" onclick="miniCalNav(1)" title="Next month">›</button>
-    <button class="mc-nav" onclick="miniCalNav(12)" title="Next year" style="font-size:0.65rem;padding:2px 4px">»</button>
+    <button class="mc-nav" onclick="miniCalNav(12)" title="Next year" style="font-size:0.6rem;padding:1px 4px">»</button>
+  </div>
+  <div style="text-align:center;margin-bottom:6px">
+    <button onclick="jumpToToday()" style="background:var(--accent);color:#fff;border:none;padding:2px 10px;border-radius:3px;font-size:0.6rem;font-weight:600;cursor:pointer;width:100%">↩ Today</button>
   </div>
   <div class="mc-grid">
     ${['S','M','T','W','T','F','S'].map(d=>`<div class="mc-dow">${d}</div>`).join('')}`;
@@ -2018,6 +2008,12 @@ function miniCalNav(dir){
   while(m>11){m-=12;y++;}
   while(m<0){m+=12;y--;}
   buildMiniCal(y,m);
+}
+
+function jumpToToday(){
+  const today=new Date();
+  buildMiniCal(today.getFullYear(),today.getMonth());
+  loadJournalEntry(today.toISOString().split('T')[0]);
 }
 
 // ── NEWS ───────────────────────────────────────────────
