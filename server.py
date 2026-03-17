@@ -333,7 +333,11 @@ def api_summary():
         total_pl_pct = (total_pl / total_cost * 100) if total_cost > 0 else 0
         cagr       = calc_cagr(total_cost, total_val, settings["invested_since"])
 
-        breaching = [h for h in holdings if h["pnl_pct"] < -settings["pos_loss_pct"]]
+        # Load per-stock custom risk limits
+        stock_risks = load_stock_risks()
+        def get_stock_limit(ticker):
+            return stock_risks.get(ticker, settings["pos_loss_pct"])
+        breaching = [h for h in holdings if h["pnl_pct"] < -get_stock_limit(h["tradingsymbol"])]
         sorted_h  = sorted(holdings, key=lambda h: h["pnl_pct"], reverse=True)
 
         # Funds / cash — fetch BEFORE risk calculation
@@ -391,6 +395,7 @@ def api_summary():
             "top_losers":    [{"ticker": h["tradingsymbol"], "pnl_pct": h["pnl_pct"], "pnl": h["pnl"]} for h in sorted_h[-5:][::-1]],
             "trade_stats":   trade_stats,
             "history":       get_history_series(),
+            "stock_risks":   load_stock_risks(),
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -448,6 +453,49 @@ def api_refresh():
 def api_history():
     """Return all saved daily portfolio snapshots."""
     return jsonify(get_history_series())
+
+
+# ── STOCK RISK LIMITS — stored alongside history in JSONBin ──
+
+STOCK_RISK_KEY = "__stock_risks__"
+
+def load_stock_risks():
+    history = load_history()
+    return history.get(STOCK_RISK_KEY, {})
+
+def save_stock_risks(risks):
+    try:
+        history = load_history()
+        history[STOCK_RISK_KEY] = risks
+        if JSONBIN_BIN_ID and JSONBIN_API_KEY:
+            data = json.dumps(history).encode()
+            req  = urllib.request.Request(
+                JSONBIN_BASE,
+                data=data,
+                method="PUT",
+                headers={"Content-Type": "application/json", "X-Master-Key": JSONBIN_API_KEY}
+            )
+            urllib.request.urlopen(req, timeout=5)
+        else:
+            with open("portfolio_history.json", "w") as f:
+                json.dump(history, f, indent=2)
+    except Exception as e:
+        print(f"Could not save stock risks: {e}")
+
+
+@app.route("/api/stock-risks", methods=["GET"])
+def get_stock_risks():
+    return jsonify(load_stock_risks())
+
+
+@app.route("/api/stock-risks", methods=["POST"])
+def set_stock_risks():
+    try:
+        risks = request.get_json()
+        save_stock_risks(risks)
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 # ─────────────────────────────────────────────────────────
@@ -624,6 +672,33 @@ tbody tr:last-child td{border-bottom:none;}
 .tk{font-weight:700;font-size:0.82rem;}
 .tv-link{color:var(--text);transition:color 0.15s;}
 .tv-link:hover{color:var(--accent);}
+/* RISK EDIT MODAL */
+.modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:200;align-items:center;justify-content:center;}
+.modal-overlay.open{display:flex;}
+.modal{background:var(--s1);border:1px solid var(--border);border-radius:12px;padding:24px;width:340px;box-shadow:0 20px 60px rgba(0,0,0,0.4);}
+.modal h3{font-size:1rem;font-weight:700;margin-bottom:4px;}
+.modal p{font-size:0.76rem;color:var(--muted);margin-bottom:16px;}
+.modal input{width:100%;background:var(--s2);border:1px solid var(--border);color:var(--text);padding:9px 12px;border-radius:6px;font-size:0.9rem;outline:none;margin-bottom:12px;font-family:'Inter',sans-serif;}
+.modal input:focus{border-color:var(--accent);}
+.modal-btns{display:flex;gap:8px;}
+.modal-btns button{flex:1;padding:9px;border-radius:6px;font-size:0.8rem;font-weight:600;cursor:pointer;border:none;font-family:'Inter',sans-serif;}
+.mbtn-save{background:var(--accent);color:#fff;}
+.mbtn-cancel{background:var(--s3);color:var(--muted);}
+/* HOLDINGS ANALYTICS */
+.ha-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px;}
+.ha-box{background:var(--s2);border-radius:8px;padding:12px;text-align:center;border:1px solid var(--border);}
+.ha-num{font-size:1.1rem;font-weight:700;letter-spacing:-0.5px;}
+.ha-lbl{font-size:0.58rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin-top:2px;}
+/* PER STOCK ANALYTICS TABLE */
+.psa-table{width:100%;border-collapse:collapse;font-size:0.76rem;}
+.psa-table th{font-size:0.6rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--muted);padding:0 8px 8px;text-align:right;border-bottom:1px solid var(--border);}
+.psa-table th:first-child{text-align:left;}
+.psa-table td{padding:9px 8px;text-align:right;border-bottom:1px solid var(--border);}
+.psa-table td:first-child{text-align:left;}
+.psa-table tr:last-child td{border-bottom:none;}
+.psa-table tr:hover td{background:var(--s2);}
+.risk-edit-btn{font-size:0.6rem;padding:2px 7px;border-radius:3px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;margin-left:4px;}
+.risk-edit-btn:hover{border-color:var(--accent);color:var(--accent);}
 .risk-bar-cell{width:80px;}
 .mini-bar{height:5px;background:var(--s3);border-radius:2px;overflow:hidden;margin-top:3px;}
 .mini-fill{height:100%;border-radius:2px;}
@@ -731,14 +806,22 @@ footer p{font-size:0.65rem;color:var(--muted);}
     <div class="tbl-wrap">
       <table>
         <thead><tr>
-          <th>Stock</th><th>Qty</th><th>Avg Cost</th><th>LTP</th><th>Value</th><th>P&L ₹</th><th>Return %</th><th>Weight</th><th>Risk</th>
+          <th>Stock</th><th>Qty</th><th>Avg Cost</th><th>LTP</th><th>Invested ₹</th><th>Current ₹</th><th>P&L ₹</th><th>Return %</th><th>Weight</th><th>Risk</th>
         </tr></thead>
         <tbody id="holdTbody"></tbody>
       </table>
     </div>
   </div>
 
-  <!-- ROW 3: TRADE ANALYTICS -->
+  <!-- ROW 3: HOLDINGS ANALYTICS -->
+  <div class="panel" style="margin-bottom:14px">
+    <div class="panel-title">Holdings Analytics <span style="font-size:0.65rem;color:var(--muted);font-weight:400">per stock performance</span></div>
+    <div id="holdingsAnalytics">
+      <div style="text-align:center;padding:20px;color:var(--muted);font-size:0.82rem">Loading...</div>
+    </div>
+  </div>
+
+  <!-- ROW 4: TRADE ANALYTICS -->
   <div class="panel" style="margin-bottom:14px">
     <div class="panel-title">Trade Analytics <span id="tradeNote"></span></div>
     <div id="tradePanel">
@@ -749,6 +832,19 @@ footer p{font-size:0.65rem;color:var(--muted);}
     </div>
   </div>
 
+</div>
+
+<!-- RISK EDIT MODAL -->
+<div class="modal-overlay" id="riskModal">
+  <div class="modal">
+    <h3>Set Risk Limit</h3>
+    <p id="riskModalDesc">Set a custom loss % limit for this stock. Leave blank to use the global default.</p>
+    <input type="number" id="riskModalInput" placeholder="e.g. 15" min="1" max="100" step="0.5">
+    <div class="modal-btns">
+      <button class="mbtn-save" onclick="saveStockRisk()">Save</button>
+      <button class="mbtn-cancel" onclick="closeRiskModal()">Cancel</button>
+    </div>
+  </div>
 </div>
 
 <footer>
@@ -764,6 +860,158 @@ let chartMode   = 'monthly';
 let lastData    = null;
 let isDark      = true;
 let autoTimer   = null;
+
+// ── STOCK RISK LIMITS (per stock, saved to JSONBin) ───
+let stockRiskLimits = {};  // { "FORCEMOT": 15, "BIOCON": 8 }
+let riskModalTicker = '';
+
+async function loadStockRiskLimits() {
+  try {
+    const r = await fetch('/api/stock-risks');
+    const d = await r.json();
+    stockRiskLimits = d || {};
+  } catch(e) { stockRiskLimits = {}; }
+}
+
+function openRiskModal(ticker, currentLimit) {
+  riskModalTicker = ticker;
+  document.getElementById('riskModalDesc').textContent =
+    `Custom loss limit for ${ticker}. Global default: ${document.getElementById('posLoss').value}%`;
+  document.getElementById('riskModalInput').value =
+    stockRiskLimits[ticker] !== undefined ? stockRiskLimits[ticker] : '';
+  document.getElementById('riskModalInput').placeholder =
+    `Global: ${document.getElementById('posLoss').value}% (leave blank to use)`;
+  document.getElementById('riskModal').classList.add('open');
+  setTimeout(() => document.getElementById('riskModalInput').focus(), 100);
+}
+
+function closeRiskModal() {
+  document.getElementById('riskModal').classList.remove('open');
+  riskModalTicker = '';
+}
+
+async function saveStockRisk() {
+  const val = document.getElementById('riskModalInput').value.trim();
+  if (val === '') {
+    delete stockRiskLimits[riskModalTicker];
+  } else {
+    stockRiskLimits[riskModalTicker] = parseFloat(val);
+  }
+  closeRiskModal();
+  // Save to server
+  try {
+    await fetch('/api/stock-risks', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(stockRiskLimits)
+    });
+  } catch(e) { console.error('Could not save risk limits', e); }
+  // Re-render with new limits
+  if (lastData) renderAll(lastData);
+}
+
+// Close modal on overlay click
+document.getElementById('riskModal').addEventListener('click', function(e) {
+  if (e.target === this) closeRiskModal();
+});
+
+// ── HOLDINGS ANALYTICS ─────────────────────────────────
+function renderHoldingsAnalytics(d) {
+  const holdings = d.holdings;
+  const totalInvested = holdings.reduce((s,h) => s + h.invested_value, 0);
+  const totalValue    = holdings.reduce((s,h) => s + h.current_value, 0);
+  const totalPL       = totalValue - totalInvested;
+  const winners       = holdings.filter(h => h.pnl > 0);
+  const losers        = holdings.filter(h => h.pnl < 0);
+  const best          = [...holdings].sort((a,b) => b.pnl_pct - a.pnl_pct)[0];
+  const worst         = [...holdings].sort((a,b) => a.pnl_pct - b.pnl_pct)[0];
+  const biggestPos    = [...holdings].sort((a,b) => b.invested_value - a.invested_value)[0];
+  const avgReturn     = holdings.reduce((s,h) => s + h.pnl_pct, 0) / holdings.length;
+
+  const el = document.getElementById('holdingsAnalytics');
+  el.innerHTML = `
+    <!-- SUMMARY STATS -->
+    <div class="ha-grid">
+      <div class="ha-box">
+        <div class="ha-num" style="color:var(--gain)">${winners.length}</div>
+        <div class="ha-lbl">In Profit</div>
+      </div>
+      <div class="ha-box">
+        <div class="ha-num" style="color:var(--loss)">${losers.length}</div>
+        <div class="ha-lbl">In Loss</div>
+      </div>
+      <div class="ha-box">
+        <div class="ha-num" style="color:${avgReturn>=0?'var(--gain)':'var(--loss)'}">${pct(avgReturn)}</div>
+        <div class="ha-lbl">Avg Return</div>
+      </div>
+      <div class="ha-box">
+        <div class="ha-num">${fmtL(totalInvested)}</div>
+        <div class="ha-lbl">Total Invested</div>
+      </div>
+    </div>
+
+    <!-- BEST / WORST / BIGGEST -->
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:16px">
+      <div class="ha-box" style="border-color:rgba(0,230,118,0.3)">
+        <div style="font-size:0.6rem;color:var(--muted);margin-bottom:4px;letter-spacing:1px">BEST PERFORMER</div>
+        <div style="font-weight:700;font-size:0.9rem">${best?.tradingsymbol||'-'}</div>
+        <div style="font-size:0.82rem;color:var(--gain);font-weight:600">${best?pct(best.pnl_pct):'-'}</div>
+        <div style="font-size:0.7rem;color:var(--muted)">${best?'+'+fmtL(best.pnl):''}</div>
+      </div>
+      <div class="ha-box" style="border-color:rgba(255,82,82,0.3)">
+        <div style="font-size:0.6rem;color:var(--muted);margin-bottom:4px;letter-spacing:1px">WORST PERFORMER</div>
+        <div style="font-weight:700;font-size:0.9rem">${worst?.tradingsymbol||'-'}</div>
+        <div style="font-size:0.82rem;color:var(--loss);font-weight:600">${worst?pct(worst.pnl_pct):'-'}</div>
+        <div style="font-size:0.7rem;color:var(--muted)">${worst?fmtL(worst.pnl):''}</div>
+      </div>
+      <div class="ha-box">
+        <div style="font-size:0.6rem;color:var(--muted);margin-bottom:4px;letter-spacing:1px">BIGGEST POSITION</div>
+        <div style="font-weight:700;font-size:0.9rem">${biggestPos?.tradingsymbol||'-'}</div>
+        <div style="font-size:0.82rem;font-weight:600">${biggestPos?fmtL(biggestPos.invested_value):'-'}</div>
+        <div style="font-size:0.7rem;color:var(--muted)">${biggestPos?biggestPos.weight_pct+'% of portfolio':''}</div>
+      </div>
+    </div>
+
+    <!-- PER STOCK TABLE -->
+    <div style="overflow-x:auto">
+      <table class="psa-table">
+        <thead><tr>
+          <th>Stock</th>
+          <th>Invested</th>
+          <th>Current</th>
+          <th>Gain/Loss ₹</th>
+          <th>Return %</th>
+          <th>Weight</th>
+          <th>Risk Limit</th>
+        </tr></thead>
+        <tbody>
+          ${[...holdings].sort((a,b)=>b.pnl_pct-a.pnl_pct).map(h => {
+            const customLimit = stockRiskLimits[h.tradingsymbol] || d.settings.pos_loss_pct;
+            const isCustom    = stockRiskLimits[h.tradingsymbol] !== undefined;
+            const exchange    = h.exchange || 'NSE';
+            const tvUrl       = `https://www.tradingview.com/chart/?symbol=${exchange}%3A${h.tradingsymbol}`;
+            return `<tr>
+              <td>
+                <a href="${tvUrl}" target="_blank" style="text-decoration:none">
+                  <span class="tv-link" style="font-weight:700">${h.tradingsymbol}</span>
+                  <span style="font-size:0.55rem;color:var(--muted)"> ↗</span>
+                </a>
+              </td>
+              <td>₹${Math.round(h.invested_value).toLocaleString('en-IN')}</td>
+              <td>₹${Math.round(h.current_value).toLocaleString('en-IN')}</td>
+              <td class="${gc(h.pnl)}">${h.pnl>=0?'+':'-'}₹${Math.abs(Math.round(h.pnl)).toLocaleString('en-IN')}</td>
+              <td class="${gc(h.pnl_pct)}" style="font-weight:600">${pct(h.pnl_pct)}</td>
+              <td class="m">${h.weight_pct}%</td>
+              <td>
+                <span style="font-family:'DM Mono',monospace;font-size:0.75rem;color:${isCustom?'var(--accent)':'var(--muted)'}">${customLimit}%${isCustom?' (custom)':''}</span>
+                <button class="risk-edit-btn" onclick="openRiskModal('${h.tradingsymbol}',${customLimit})">✎</button>
+              </td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>`;
+}
 
 // ── THEME ──────────────────────────────────────────────
 function toggleTheme() {
@@ -848,6 +1096,8 @@ function renderAll(d) {
   const rs = d.risk;
   const st = d.settings;
   const ts = d.trade_stats;
+  // Sync stock risk limits from server response
+  if (d.stock_risks) stockRiskLimits = d.stock_risks;
 
   // ALERT
   const ab = document.getElementById('alertBanner');
@@ -945,43 +1195,52 @@ function renderAll(d) {
   // GROWTH CHART
   renderGrowthChart(d);
 
-  // HOLDINGS TABLE — ticker clicks open TradingView
+  // HOLDINGS TABLE — ticker clicks open TradingView, custom risk per stock
   document.getElementById('holdCount').textContent = d.holdings.length+' stocks';
   const pl = st.pos_loss_pct;
   document.getElementById('holdTbody').innerHTML = d.holdings.map(h=>{
-    const barW   = Math.min(Math.abs(h.pnl_pct) / pl * 100, 100);
-    const barClr = h.pnl_pct < -pl ? 'var(--loss)' : h.pnl_pct < -(pl*0.7) ? 'var(--warn)' : h.pnl_pct >= 0 ? 'var(--gain)' : 'var(--warn)';
-    const badge  = h.pnl_pct < -pl
+    const customLimit = stockRiskLimits[h.tradingsymbol] || pl;
+    const barW   = Math.min(Math.abs(h.pnl_pct) / customLimit * 100, 100);
+    const barClr = h.pnl_pct < -customLimit ? 'var(--loss)' : h.pnl_pct < -(customLimit*0.7) ? 'var(--warn)' : h.pnl_pct >= 0 ? 'var(--gain)' : 'var(--warn)';
+    const badge  = h.pnl_pct < -customLimit
       ? `<span class="sri-badge badge-bad">🔴 BREACH</span>`
-      : h.pnl_pct < -(pl*0.7)
+      : h.pnl_pct < -(customLimit*0.7)
         ? `<span class="sri-badge badge-warn">🟡 WATCH</span>`
         : `<span class="sri-badge badge-ok">🟢 OK</span>`;
-    // TradingView URL: BSE:SYMBOL or NSE:SYMBOL
     const exchange = h.exchange || 'NSE';
     const tvUrl = `https://www.tradingview.com/chart/?symbol=${exchange}%3A${h.tradingsymbol}`;
+    const isCustom = stockRiskLimits[h.tradingsymbol] !== undefined;
     return `<tr>
       <td>
-        <a href="${tvUrl}" target="_blank" title="Open ${h.tradingsymbol} on TradingView"
-           style="text-decoration:none;display:flex;align-items:center;gap:6px">
+        <a href="${tvUrl}" target="_blank" style="text-decoration:none;display:flex;align-items:center;gap:4px">
           <span class="tk tv-link">${h.tradingsymbol}</span>
-          <span style="font-size:0.6rem;color:var(--muted);opacity:0.6">↗</span>
+          <span style="font-size:0.6rem;color:var(--muted);opacity:0.5">↗</span>
         </a>
       </td>
       <td>${h.quantity}</td>
       <td>₹${(h.average_price||0).toLocaleString('en-IN',{maximumFractionDigits:0})}</td>
       <td>₹${(h.last_price||0).toLocaleString('en-IN',{maximumFractionDigits:0})}</td>
+      <td><strong>₹${Math.round(h.invested_value).toLocaleString('en-IN')}</strong></td>
       <td>₹${Math.round(h.current_value).toLocaleString('en-IN')}</td>
       <td class="${gc(h.pnl)}">${h.pnl>=0?'+':'-'}₹${Math.abs(Math.round(h.pnl)).toLocaleString('en-IN')}</td>
       <td class="${gc(h.pnl_pct)}">${pct(h.pnl_pct)}</td>
       <td class="m">${h.weight_pct}%</td>
       <td>
-        ${badge}
+        <div style="display:flex;align-items:center;gap:4px">
+          ${badge}
+          <button class="risk-edit-btn" onclick="openRiskModal('${h.tradingsymbol}',${customLimit})" title="Set custom risk limit">
+            ${isCustom ? customLimit+'%✎' : '✎'}
+          </button>
+        </div>
         <div class="mini-bar" style="margin-top:4px">
           <div class="mini-fill" style="width:${h.pnl_pct>=0?100:barW}%;background:${barClr}"></div>
         </div>
       </td>
     </tr>`;
   }).join('');
+
+  // HOLDINGS ANALYTICS — per stock + overall summary
+  renderHoldingsAnalytics(d);
 
   // TRADE ANALYTICS
   if(ts && ts.total_trades > 0) {
@@ -1172,6 +1431,7 @@ window.addEventListener('load', () => {
     document.getElementById('connectError').style.display = 'block';
     history.replaceState({},'','/');
   }
+  loadStockRiskLimits();
   checkAuth();
 });
 </script>
