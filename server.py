@@ -461,6 +461,38 @@ def api_refresh():
     return jsonify({"ok": True, "message": "Cache cleared"})
 
 
+@app.route("/api/ticker")
+def api_ticker():
+    """Fetch live index prices from Yahoo Finance — free, no API key needed."""
+    symbols = {
+        "NIFTY50":   "^NSEI",
+        "MIDCAP100": "^NSEMDCP100",
+        "SMALLCAP":  "^CNXSC",
+        "BANKNIFTY": "^NSEBANK",
+        "SENSEX":    "^BSESN",
+    }
+    result = {}
+    for name, sym in symbols.items():
+        try:
+            url = f"https://query1.finance.yahoo.com/v8/finance/chart/{sym}?interval=1m&range=1d"
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=5) as r:
+                data = json.loads(r.read().decode())
+            meta  = data["chart"]["result"][0]["meta"]
+            price = meta.get("regularMarketPrice", 0)
+            prev  = meta.get("chartPreviousClose", price)
+            chg   = price - prev
+            chgPct= (chg / prev * 100) if prev else 0
+            result[name] = {
+                "price":   round(price, 2),
+                "change":  round(chg, 2),
+                "changePct": round(chgPct, 2),
+            }
+        except Exception as e:
+            result[name] = {"price": 0, "change": 0, "changePct": 0, "error": str(e)}
+    return jsonify(result)
+
+
 @app.route("/api/debug")
 def api_debug():
     """Shows what's working and what's not — visit this URL to diagnose issues."""
@@ -896,26 +928,63 @@ tbody tr:last-child td{border-bottom:none;}
 </head>
 <body>
 
-<!-- TICKER STRIP -->
+<!-- TICKER STRIP — continuous scroll -->
 <div class="ticker-strip" id="tickerStrip">
-  <a class="ticker-item" href="https://www.tradingview.com/chart/?symbol=NSE%3ANIFTY" target="_blank">
-    <span class="ticker-name">NIFTY 50</span>
-    <span class="ticker-price" id="tn50">—</span>
-    <span class="ticker-chg" id="tc50">—</span>
-  </a>
-  <span class="ticker-sep">|</span>
-  <a class="ticker-item" href="https://www.tradingview.com/chart/?symbol=NSE%3AMIDCPNIFTY" target="_blank">
-    <span class="ticker-name">MIDCAP 100</span>
-    <span class="ticker-price" id="tnMid">—</span>
-    <span class="ticker-chg" id="tcMid">—</span>
-  </a>
-  <span class="ticker-sep">|</span>
-  <a class="ticker-item" href="https://www.tradingview.com/chart/?symbol=NSE%3ANIFTYSMLCAP100" target="_blank">
-    <span class="ticker-name">SMALLCAP 100</span>
-    <span class="ticker-price" id="tnSml">—</span>
-    <span class="ticker-chg" id="tcSml">—</span>
-  </a>
-  <span style="margin-left:auto;font-size:0.6rem;color:var(--muted)">Click any index to open TradingView chart</span>
+  <div class="ticker-track" id="tickerTrack">
+    <!-- Set 1 -->
+    <a class="ticker-item" href="https://www.tradingview.com/chart/?symbol=NSE%3ANIFTY" target="_blank">
+      <span class="ticker-name">NIFTY 50</span>
+      <span class="ticker-price" id="tn50">—</span>
+      <span class="ticker-chg" id="tc50" style="color:var(--muted)">Live prices need paid plan</span>
+    </a>
+    <a class="ticker-item" href="https://www.tradingview.com/chart/?symbol=NSE%3AMIDCPNIFTY" target="_blank">
+      <span class="ticker-name">MIDCAP 100</span>
+      <span class="ticker-price" id="tnMid">—</span>
+      <span class="ticker-chg" id="tcMid"></span>
+    </a>
+    <a class="ticker-item" href="https://www.tradingview.com/chart/?symbol=NSE%3ANIFTYSMLCAP100" target="_blank">
+      <span class="ticker-name">SMALLCAP 100</span>
+      <span class="ticker-price" id="tnSml">—</span>
+      <span class="ticker-chg" id="tcSml"></span>
+    </a>
+    <a class="ticker-item" href="https://www.tradingview.com/chart/?symbol=NSE%3ABANKNIFTY" target="_blank">
+      <span class="ticker-name">BANK NIFTY</span>
+      <span class="ticker-price">—</span>
+    </a>
+    <a class="ticker-item" href="https://www.tradingview.com/chart/?symbol=NSE%3ANIFTYNXT50" target="_blank">
+      <span class="ticker-name">NIFTY NEXT 50</span>
+      <span class="ticker-price">—</span>
+    </a>
+    <a class="ticker-item" href="https://www.tradingview.com/chart/?symbol=BSE%3ASENSEX" target="_blank">
+      <span class="ticker-name">SENSEX</span>
+      <span class="ticker-price">—</span>
+    </a>
+    <!-- Set 2 — duplicate for seamless loop -->
+    <a class="ticker-item" href="https://www.tradingview.com/chart/?symbol=NSE%3ANIFTY" target="_blank">
+      <span class="ticker-name">NIFTY 50</span>
+      <span class="ticker-price">—</span>
+    </a>
+    <a class="ticker-item" href="https://www.tradingview.com/chart/?symbol=NSE%3AMIDCPNIFTY" target="_blank">
+      <span class="ticker-name">MIDCAP 100</span>
+      <span class="ticker-price">—</span>
+    </a>
+    <a class="ticker-item" href="https://www.tradingview.com/chart/?symbol=NSE%3ANIFTYSMLCAP100" target="_blank">
+      <span class="ticker-name">SMALLCAP 100</span>
+      <span class="ticker-price">—</span>
+    </a>
+    <a class="ticker-item" href="https://www.tradingview.com/chart/?symbol=NSE%3ABANKNIFTY" target="_blank">
+      <span class="ticker-name">BANK NIFTY</span>
+      <span class="ticker-price">—</span>
+    </a>
+    <a class="ticker-item" href="https://www.tradingview.com/chart/?symbol=NSE%3ANIFTYNXT50" target="_blank">
+      <span class="ticker-name">NIFTY NEXT 50</span>
+      <span class="ticker-price">—</span>
+    </a>
+    <a class="ticker-item" href="https://www.tradingview.com/chart/?symbol=BSE%3ASENSEX" target="_blank">
+      <span class="ticker-name">SENSEX</span>
+      <span class="ticker-price">—</span>
+    </a>
+  </div>
 </div>
 
 <header>
@@ -1141,14 +1210,82 @@ let lastData=null, stockRiskLimits={}, riskModalTicker='';
 let journalData={}, journalCurrentDate='', journalSaveTimer=null;
 let calCurrentYear=new Date().getFullYear(), calCurrentMonth=new Date().getMonth();
 let activeSectors=new Set();
+// NSE Sector Map — comprehensive list of NSE-listed stocks by sector
+// Add your specific holdings here if missing
 const SECTOR_MAP = {
-  'HDFCBANK':'Financial Services','SBIN':'Financial Services','BAJFINANCE':'Financial Services',
-  'RELIANCE':'Energy','ONGC':'Energy','IOC':'Energy','BPCL':'Energy','CPCL':'Energy','MRPL':'Energy',
-  'INFY':'Information Technology','TCS':'Information Technology','WIPRO':'Information Technology','TECHM':'Information Technology',
-  'SUNPHARMA':'Pharma','CIPLA':'Pharma','NATCO':'Pharma','DRREDDY':'Pharma','BIOCON':'Pharma',
-  'TATAMOTOR':'Automobiles','MARUTI':'Automobiles','BAJAJ-AUTO':'Automobiles','HEROMOTOCO':'Automobiles',
-  'FORCEMOT':'Automobiles','GVT&D':'Capital Goods','VENUSREM':'Healthcare',
+  // Financial Services
+  'HDFCBANK':'Financial Services','SBIN':'Financial Services','ICICIBANK':'Financial Services',
+  'KOTAKBANK':'Financial Services','AXISBANK':'Financial Services','INDUSINDBK':'Financial Services',
+  'BAJFINANCE':'Financial Services','BAJAJFINSV':'Financial Services','SBICARD':'Financial Services',
+  'CHOLAFIN':'Financial Services','MUTHOOTFIN':'Financial Services','MANAPPURAM':'Financial Services',
+  'LICHSGFIN':'Financial Services','RECLTD':'Financial Services','PFC':'Financial Services',
+  // Energy & Oil
+  'RELIANCE':'Energy','ONGC':'Energy','IOC':'Energy','BPCL':'Energy','CPCL':'Energy',
+  'MRPL':'Energy','GAIL':'Energy','OIL':'Energy','PETRONET':'Energy','IGL':'Energy','MGL':'Energy',
+  'HINDPETRO':'Energy','CASTROLIND':'Energy','GSPL':'Energy',
+  // Information Technology
+  'INFY':'Information Technology','TCS':'Information Technology','WIPRO':'Information Technology',
+  'TECHM':'Information Technology','HCLTECH':'Information Technology','LTI':'Information Technology',
+  'MPHASIS':'Information Technology','COFORGE':'Information Technology','PERSISTENT':'Information Technology',
+  'LTIMINDTREE':'Information Technology','OFSS':'Information Technology',
+  // Pharma & Healthcare
+  'SUNPHARMA':'Pharma & Healthcare','CIPLA':'Pharma & Healthcare','NATCO':'Pharma & Healthcare',
+  'DRREDDY':'Pharma & Healthcare','BIOCON':'Pharma & Healthcare','LUPIN':'Pharma & Healthcare',
+  'AUROPHARMA':'Pharma & Healthcare','DIVISLAB':'Pharma & Healthcare','TORNTPHARM':'Pharma & Healthcare',
+  'ABBOTINDIA':'Pharma & Healthcare','IPCALAB':'Pharma & Healthcare','ALKEM':'Pharma & Healthcare',
+  'VENUSREM':'Pharma & Healthcare','SYNGENE':'Pharma & Healthcare','METROPOLIS':'Pharma & Healthcare',
+  // Automobiles
+  'TATAMOTOR':'Automobiles','MARUTI':'Automobiles','BAJAJ-AUTO':'Automobiles',
+  'HEROMOTOCO':'Automobiles','EICHERMOT':'Automobiles','M&M':'Automobiles',
+  'FORCEMOT':'Automobiles','ASHOKLEY':'Automobiles','ESCORTS':'Automobiles',
+  'BALKRISIND':'Automobiles','MRF':'Automobiles','APOLLOTYRE':'Automobiles',
+  // Capital Goods & Engineering
+  'GVT&D':'Capital Goods','L&T':'Capital Goods','BEL':'Capital Goods','HAL':'Capital Goods',
+  'BHEL':'Capital Goods','SIEMENS':'Capital Goods','ABB':'Capital Goods',
+  'THERMAX':'Capital Goods','CUMMINSIND':'Capital Goods','KAJARIACER':'Capital Goods',
+  'GRINDWELL':'Capital Goods','APLAPOLLO':'Capital Goods',
+  // FMCG
+  'HINDUNILVR':'FMCG','ITC':'FMCG','NESTLEIND':'FMCG','BRITANNIA':'FMCG',
+  'DABUR':'FMCG','MARICO':'FMCG','GODREJCP':'FMCG','COLPAL':'FMCG',
+  'EMAMILTD':'FMCG','TATACONSUM':'FMCG','VBL':'FMCG','UBL':'FMCG',
+  // Metals & Mining
+  'TATASTEEL':'Metals','JSWSTEEL':'Metals','HINDALCO':'Metals','VEDL':'Metals',
+  'NATIONALUM':'Metals','SAIL':'Metals','NMDC':'Metals','COALINDIA':'Metals',
+  'JINDALSTEL':'Metals','APLAPOLLO':'Metals',
+  // Real Estate
+  'DLF':'Real Estate','GODREJPROP':'Real Estate','OBEROIRLTY':'Real Estate',
+  'PRESTIGE':'Real Estate','PHOENIXLTD':'Real Estate','BRIGADE':'Real Estate',
+  // Cement
+  'ULTRACEMCO':'Cement','SHREECEM':'Cement','AMBUJACEM':'Cement',
+  'ACC':'Cement','DALMIACELE':'Cement','RAMCOCEM':'Cement',
+  // Telecom
+  'BHARTIARTL':'Telecom','IDEA':'Telecom','TATACOMM':'Telecom',
+  // Consumer Durables
+  'HAVELLS':'Consumer Durables','VOLTAS':'Consumer Durables','WHIRLPOOL':'Consumer Durables',
+  'BLUESTARCO':'Consumer Durables','CROMPTON':'Consumer Durables','AMBER':'Consumer Durables',
+  // Chemicals
+  'PIDILITIND':'Chemicals','ASIANPAINT':'Chemicals','BERGEPAINT':'Chemicals',
+  'AARTIIND':'Chemicals','DEEPAKNTR':'Chemicals','VINATIORGA':'Chemicals',
+  // Insurance
+  'HDFCLIFE':'Insurance','SBILIFE':'Insurance','ICICIGI':'Insurance',
+  'ICICIPRULI':'Insurance','LICI':'Insurance','GICRE':'Insurance',
 };
+
+// Smart sector guesser for unknown tickers
+function getSector(ticker){
+  if(SECTOR_MAP[ticker]) return SECTOR_MAP[ticker];
+  // Try to guess from name patterns
+  const t=ticker.toUpperCase();
+  if(t.includes('BANK')||t.includes('FIN')||t.includes('NBFC')) return 'Financial Services';
+  if(t.includes('PHARMA')||t.includes('CHEM')||t.includes('LAB')) return 'Pharma & Healthcare';
+  if(t.includes('TECH')||t.includes('INFO')||t.includes('SOFT')) return 'Information Technology';
+  if(t.includes('AUTO')||t.includes('MOTOR')||t.includes('TYRE')) return 'Automobiles';
+  if(t.includes('STEEL')||t.includes('METAL')||t.includes('ALUM')) return 'Metals';
+  if(t.includes('CEMENT')||t.includes('CEM')) return 'Cement';
+  if(t.includes('POWER')||t.includes('ENERGY')||t.includes('GAS')) return 'Energy';
+  if(t.includes('REAL')||t.includes('PROP')||t.includes('REALTY')) return 'Real Estate';
+  return ticker; // use ticker name as sector if completely unknown — not "Others"
+}
 
 // ── FORMAT ─────────────────────────────────────────────
 const fmtL=n=>{const a=Math.abs(n),s=n<0?'-':'';if(a>=10000000)return s+(a/10000000).toFixed(2)+'Cr';if(a>=100000)return s+(a/100000).toFixed(2)+'L';if(a>=1000)return s+(a/1000).toFixed(1)+'K';return (n<0?'-':'')+'₹'+a.toFixed(0);};
@@ -1201,7 +1338,14 @@ function showDashboard(name){
   document.getElementById('logoutBtn').style.display='inline-block';
   document.getElementById('footerUser').textContent=name||'';
 }
-function startAuto(){stopAuto();autoTimer=setInterval(loadData,60000);}
+let tickerTimer=null;
+function startAuto(){
+  stopAuto();
+  autoTimer=setInterval(loadData,60000);
+  updateIndexTickers();  // fetch immediately
+  tickerTimer=setInterval(updateIndexTickers,300000); // refresh every 5 min
+}
+function stopAutoTicker(){if(tickerTimer){clearInterval(tickerTimer);tickerTimer=null;}}
 function stopAuto(){if(autoTimer){clearInterval(autoTimer);autoTimer=null;}}
 
 // ── LOAD DATA ──────────────────────────────────────────
@@ -1219,6 +1363,7 @@ async function loadData(){
     lastData=d;
     if(d.stock_risks)stockRiskLimits=d.stock_risks;
     renderOverview(d);
+    updateIndexTickers();
     const t=new Date().toLocaleTimeString('en-IN');
     document.getElementById('updatedBar').textContent='Updated '+t;
     document.getElementById('updatedLbl').textContent=t;
@@ -1227,20 +1372,37 @@ async function loadData(){
 }
 
 // ── INDEX TICKERS (estimated from holdings data) ───────
-function updateIndexTickers(d){
-  // We use placeholder values — real index prices need websocket/paid API
-  // Show a note that these are indicative
-  const indices=[
-    {id:'50',name:'NIFTY 50',base:22000},
-    {id:'Mid',name:'MIDCAP',base:48000},
-    {id:'Sml',name:'SMALLCAP',base:15000}
-  ];
-  indices.forEach(idx=>{
-    const el=document.getElementById('tn'+idx.id);
-    const ec=document.getElementById('tc'+idx.id);
-    if(el) el.textContent='—';
-    if(ec){ec.textContent='Live prices need Kite paid plan';ec.style.fontSize='0.58rem';ec.className='ticker-chg m';}
-  });
+async function updateIndexTickers(){
+  try{
+    const r = await fetch('/api/ticker');
+    const d = await r.json();
+    // Update all ticker items in the scrolling strip
+    const items = document.querySelectorAll('.ticker-item');
+    const MAP = {
+      'NIFTY 50':     d.NIFTY50,
+      'MIDCAP 100':   d.MIDCAP100,
+      'SMALLCAP 100': d.SMALLCAP,
+      'BANK NIFTY':   d.BANKNIFTY,
+      'SENSEX':       d.SENSEX,
+      'NIFTY NEXT 50':null,
+    };
+    items.forEach(item=>{
+      const nameEl  = item.querySelector('.ticker-name');
+      const priceEl = item.querySelector('.ticker-price');
+      const chgEl   = item.querySelector('.ticker-chg');
+      if(!nameEl||!priceEl) return;
+      const name = nameEl.textContent.trim();
+      const data = MAP[name];
+      if(!data||!data.price) return;
+      priceEl.textContent = data.price.toLocaleString('en-IN');
+      if(chgEl){
+        const up = data.change >= 0;
+        chgEl.textContent = `${up?'▲':'▼'} ${Math.abs(data.changePct).toFixed(2)}%`;
+        chgEl.style.color = up ? 'var(--gain)' : 'var(--loss)';
+        chgEl.style.fontSize = '0.65rem';
+      }
+    });
+  }catch(e){ console.log('Ticker fetch failed:', e); }
 }
 
 // ── RENDER OVERVIEW ────────────────────────────────────
@@ -1528,10 +1690,23 @@ function renderHoldingsAnalytics(d){
 // ── CALENDAR — full year heatmap like GitHub ───────────
 function buildDayPLMap(history){
   const plMap={};
+  // history[i].pl is TOTAL unrealised P&L on that day
+  // daily change = today's portfolio value minus yesterday's portfolio value
   history.forEach((h,i)=>{
-    const dayPL = i>0 ? h.pl - history[i-1].pl : 0;
-    plMap[h.date] = {pl:dayPL, value:h.value};
+    const dayPL = i>0
+      ? (h.value||0) - (history[i-1].value||0)  // value change = actual daily gain/loss
+      : 0;
+    plMap[h.date] = {pl: Math.round(dayPL), value: h.value, totalPL: h.pl};
   });
+  // Also mark today from last data
+  if(lastData){
+    const today = new Date().toISOString().split('T')[0];
+    if(!plMap[today] && history.length>0){
+      const last = history[history.length-1];
+      const dayPL = (lastData.portfolio.total_value||0) - (last.value||0);
+      plMap[today] = {pl: Math.round(dayPL), value: lastData.portfolio.total_value, totalPL: lastData.portfolio.total_pl};
+    }
+  }
   return plMap;
 }
 
@@ -1635,7 +1810,7 @@ function renderSectors(d){
   const holdings = d.holdings;
   const sectorMap = {};
   holdings.forEach(h=>{
-    const sector = SECTOR_MAP[h.tradingsymbol]||'Others';
+    const sector = getSector(h.tradingsymbol);
     if(!sectorMap[sector]) sectorMap[sector]={value:0,invested:0,pl:0,stocks:[]};
     sectorMap[sector].value    += h.current_value;
     sectorMap[sector].invested += h.invested_value;
@@ -1645,7 +1820,8 @@ function renderSectors(d){
 
   const viewEl = document.querySelector('input[name="sectorView"]:checked');
   const view   = viewEl ? viewEl.value : 'value';
-  const sectors = Object.entries(sectorMap).sort((a,b)=>b[1][view==='pl'?'pl':'value']-a[1][view==='pl'?'pl':'value']);
+  // Always sort by P&L high to low — shows which sectors making most money
+  const sectors = Object.entries(sectorMap).sort((a,b)=>b[1].pl-a[1].pl);
   const totalVal   = holdings.reduce((s,h)=>s+h.current_value,0);
   const totalKey   = view==='value'?sectors.reduce((s,[,v])=>s+v.value,0):view==='invested'?sectors.reduce((s,[,v])=>s+v.invested,0):null;
 
@@ -1809,10 +1985,14 @@ function buildMiniCal(year,month){
   const today=new Date();
   const firstDay=new Date(year,month,1).getDay();
   const days=new Date(year,month+1,0).getDate();
-  let html=`<div class="mc-header">
-    <button class="mc-nav" onclick="miniCalNav(-1)">‹</button>
-    <div class="mc-title">${new Date(year,month,1).toLocaleString('en-IN',{month:'short',year:'numeric'})}</div>
-    <button class="mc-nav" onclick="miniCalNav(1)">›</button>
+  const monthName=new Date(year,month,1).toLocaleString('en-IN',{month:'short'});
+  let html=`
+  <div class="mc-header">
+    <button class="mc-nav" onclick="miniCalNav(-12)" title="Previous year" style="font-size:0.65rem;padding:2px 4px">«</button>
+    <button class="mc-nav" onclick="miniCalNav(-1)" title="Previous month">‹</button>
+    <div class="mc-title">${monthName} ${year}</div>
+    <button class="mc-nav" onclick="miniCalNav(1)" title="Next month">›</button>
+    <button class="mc-nav" onclick="miniCalNav(12)" title="Next year" style="font-size:0.65rem;padding:2px 4px">»</button>
   </div>
   <div class="mc-grid">
     ${['S','M','T','W','T','F','S'].map(d=>`<div class="mc-dow">${d}</div>`).join('')}`;
@@ -1822,7 +2002,9 @@ function buildMiniCal(year,month){
     const isToday=today.getFullYear()===year&&today.getMonth()===month&&today.getDate()===d;
     const hasEntry=!!journalData[dateStr];
     const isSel=dateStr===journalCurrentDate;
-    html+=`<div class="mc-day${hasEntry?' has-entry':''}${isToday?' today':''}${isSel?' selected':''}" onclick="loadJournalEntry('${dateStr}')">${d}</div>`;
+    html+=`<div class="mc-day${hasEntry?' has-entry':''}${isToday?' today':''}${isSel?' selected':''}"
+      onclick="loadJournalEntry('${dateStr}')"
+      title="${dateStr}${hasEntry?' · has entry':''}">${d}</div>`;
   }
   html+='</div>';
   document.getElementById('journalMiniCal').innerHTML=html;
@@ -1833,7 +2015,8 @@ function buildMiniCal(year,month){
 function miniCalNav(dir){
   const el=document.getElementById('journalMiniCal');
   let y=parseInt(el.dataset.year),m=parseInt(el.dataset.month)+dir;
-  if(m>11){m=0;y++;}if(m<0){m=11;y--;}
+  while(m>11){m-=12;y++;}
+  while(m<0){m+=12;y--;}
   buildMiniCal(y,m);
 }
 
