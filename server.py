@@ -1347,7 +1347,13 @@ const gc=n=>n>=0?'g':'l';
 const gclr=n=>n>=0?'var(--gain)':'var(--loss)';
 
 // ── THEME ──────────────────────────────────────────────
-function toggleTheme(){isDark=!isDark;document.body.classList.toggle('light',!isDark);document.querySelector('.theme-btn').textContent=isDark?'🌙':'☀️';if(lastData)renderGrowthChart(lastData);}
+function toggleTheme(){
+  isDark=!isDark;
+  document.body.classList.toggle('light',!isDark);
+  document.querySelector('.theme-btn').textContent=isDark?'🌙':'☀️';
+  try{localStorage.setItem('folio_theme',isDark?'dark':'light');}catch(e){}
+  if(lastData)renderGrowthChart(lastData);
+}
 
 // ── NAV ────────────────────────────────────────────────
 function showPage(name){
@@ -2280,9 +2286,19 @@ function loadSettings(){
 }
 
 window.addEventListener('load',()=>{
+  // Restore theme first — before anything renders
+  try{
+    const savedTheme = localStorage.getItem('folio_theme');
+    if(savedTheme === 'light'){
+      isDark = false;
+      document.body.classList.add('light');
+      document.querySelector('.theme-btn').textContent = '☀️';
+    }
+  }catch(e){}
+
   const params=new URLSearchParams(window.location.search);
   if(params.get('error')){document.getElementById('connectError').textContent='Login error: '+params.get('error');document.getElementById('connectError').style.display='block';history.replaceState({},'','/');}
-  loadSettings();          // restore saved settings first
+  loadSettings();
   loadStockRiskLimits();
   loadJournalFromServer();
   checkAuth();
