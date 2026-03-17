@@ -466,10 +466,8 @@ def api_ticker():
     """Fetch live index prices from Yahoo Finance — free, no API key needed."""
     symbols = {
         "NIFTY50":   "^NSEI",
-        "MIDCAP100": "^NSEMDCP100",
-        "SMALLCAP":  "^CNXSC",
-        "BANKNIFTY": "^NSEBANK",
-        "SENSEX":    "^BSESN",
+        "MIDCAP100": "^CNXMDCP100",   # NSE Midcap 100
+        "SMALLCAP":  "^CNXSC",        # NSE Smallcap 100
     }
     result = {}
     for name, sym in symbols.items():
@@ -488,16 +486,23 @@ def api_ticker():
                 "change":    round(chg, 2),
                 "changePct": round(chgPct, 2),
             }
-            # PE ratio for Nifty 50 via summary endpoint
+            # PE ratio for Nifty 50
             if name == "NIFTY50":
                 try:
-                    pe_url = "https://query1.finance.yahoo.com/v10/finance/quoteSummary/%5ENSEI?modules=summaryDetail"
-                    pe_req = urllib.request.Request(pe_url, headers={"User-Agent": "Mozilla/5.0"})
-                    with urllib.request.urlopen(pe_req, timeout=5) as pr:
+                    # Use Yahoo Finance v11 quote endpoint — more reliable
+                    pe_url = "https://query1.finance.yahoo.com/v11/finance/quoteSummary/%5ENSEI?modules=defaultKeyStatistics,summaryDetail"
+                    pe_req = urllib.request.Request(pe_url, headers={"User-Agent":"Mozilla/5.0","Accept":"application/json"})
+                    with urllib.request.urlopen(pe_req, timeout=6) as pr:
                         pe_data = json.loads(pr.read().decode())
-                    pe = pe_data["quoteSummary"]["result"][0]["summaryDetail"].get("trailingPE", {}).get("raw", None)
-                    if pe: entry["pe"] = round(pe, 1)
-                except: pass
+                    res = pe_data["quoteSummary"]["result"][0]
+                    # Try trailingPE from defaultKeyStatistics first
+                    pe = res.get("defaultKeyStatistics",{}).get("trailingEps",{}).get("raw")
+                    pe2 = res.get("summaryDetail",{}).get("trailingPE",{}).get("raw")
+                    if pe2: entry["pe"] = round(pe2, 1)
+                    elif pe and price and pe: entry["pe"] = round(price/pe, 1)
+                except Exception as pe_err:
+                    # Fallback: hardcode approximate PE as note
+                    entry["pe_note"] = "PE N/A"
             result[name] = entry
         except Exception as e:
             result[name] = {"price": 0, "change": 0, "changePct": 0, "error": str(e)}
@@ -721,7 +726,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
 body{background:var(--bg);color:var(--text);font-family:'Inter',sans-serif;font-size:13px;min-height:100vh;overflow-x:hidden;}
 
 /* TICKER STRIP */
-.ticker-strip{background:var(--s1);border-bottom:1px solid var(--border);padding:0 16px;height:30px;display:flex;align-items:center;gap:20px;overflow:hidden;}
+.ticker-strip{background:var(--s1);border-bottom:1px solid var(--border);padding:0 16px;height:28px;display:flex;align-items:center;gap:0;overflow:hidden;position:sticky;top:0;z-index:101;}
 .ticker-item{display:flex;align-items:center;gap:6px;cursor:pointer;text-decoration:none;color:var(--text);transition:opacity 0.15s;white-space:nowrap;}
 .ticker-item:hover{opacity:0.75;}
 .ticker-name{font-size:0.68rem;font-weight:600;color:var(--muted);}
@@ -730,7 +735,7 @@ body{background:var(--bg);color:var(--text);font-family:'Inter',sans-serif;font-
 .ticker-sep{color:var(--border);font-size:0.8rem;}
 
 /* HEADER */
-header{background:var(--s1);border-bottom:1px solid var(--border);padding:0 16px;height:48px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:30px;z-index:100;box-shadow:var(--shadow);}
+header{background:var(--s1);border-bottom:1px solid var(--border);padding:0 16px;height:44px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:28px;z-index:100;box-shadow:var(--shadow);}
 .logo{font-size:1rem;font-weight:700;letter-spacing:-0.5px;}
 .logo em{color:var(--accent);font-style:normal;}
 .hright{display:flex;align-items:center;gap:8px;}
@@ -743,7 +748,7 @@ header{background:var(--s1);border-bottom:1px solid var(--border);padding:0 16px
 .theme-btn{width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:0.85rem;cursor:pointer;border:1px solid var(--border);background:var(--s2);}
 
 /* NAV TABS */
-.nav-tabs{background:var(--s1);border-bottom:1px solid var(--border);padding:0 16px;display:flex;gap:2px;overflow-x:auto;}
+.nav-tabs{background:var(--s1);border-bottom:1px solid var(--border);padding:0 16px;display:flex;gap:2px;overflow-x:auto;position:sticky;top:72px;z-index:99;}
 .nav-tab{font-size:0.72rem;font-weight:500;padding:10px 14px;border:none;background:none;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap;transition:all 0.15s;}
 .nav-tab:hover{color:var(--text);}
 .nav-tab.active{color:var(--accent);border-bottom-color:var(--accent);}
@@ -765,6 +770,7 @@ header{background:var(--s1);border-bottom:1px solid var(--border);padding:0 16px
 #dashboard{display:none;}
 .page{display:none;padding:14px 16px 24px;}
 .page.active{display:block;}
+#page-journal.active{display:flex;flex-direction:column;padding-bottom:0;}
 
 /* SETTINGS BAR */
 .settings-bar{background:var(--s1);border:1px solid var(--border);border-radius:8px;padding:11px 14px;margin-bottom:14px;display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;}
@@ -887,31 +893,39 @@ tbody tr:last-child td{border-bottom:none;}
 .sector-details.show{display:block;}
 
 /* JOURNAL */
-.journal-layout{display:grid;grid-template-columns:200px 1fr;gap:14px;}
-.journal-sidebar{background:var(--s2);border-radius:8px;padding:12px;border:1px solid var(--border);}
-.journal-mini-cal .mc-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;}
-.journal-mini-cal .mc-title{font-size:0.72rem;font-weight:600;}
-.journal-mini-cal .mc-nav{background:none;border:none;color:var(--muted);cursor:pointer;font-size:0.9rem;padding:2px 5px;}
+#page-journal{height:calc(100vh - 160px);display:flex;flex-direction:column;}
+#page-journal .panel{flex:1;display:flex;flex-direction:column;overflow:hidden;margin-bottom:0;}
+.journal-layout{display:grid;grid-template-columns:190px 1fr;gap:14px;flex:1;overflow:hidden;min-height:0;}
+.journal-sidebar{background:var(--s2);border-radius:8px;padding:12px;border:1px solid var(--border);overflow-y:auto;}
+.journal-mini-cal .mc-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;}
+.journal-mini-cal .mc-title{font-size:0.68rem;font-weight:600;}
+.journal-mini-cal .mc-nav{background:none;border:none;color:var(--muted);cursor:pointer;font-size:0.85rem;padding:1px 4px;}
 .journal-mini-cal .mc-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:2px;}
-.journal-mini-cal .mc-dow{font-size:0.55rem;text-align:center;color:var(--muted);padding:3px 0;}
-.mc-day{font-size:0.62rem;text-align:center;padding:4px 2px;border-radius:3px;cursor:pointer;border:1px solid transparent;}
+.journal-mini-cal .mc-dow{font-size:0.52rem;text-align:center;color:var(--muted);padding:2px 0;}
+.mc-day{font-size:0.6rem;text-align:center;padding:3px 2px;border-radius:3px;cursor:pointer;border:1px solid transparent;}
 .mc-day:hover{border-color:var(--accent);}
 .mc-day.has-entry{font-weight:700;color:var(--accent);}
 .mc-day.today{background:var(--accent);color:#fff;border-radius:50%;}
 .mc-day.selected{border-color:var(--accent);}
-.journal-main{display:flex;flex-direction:column;gap:10px;}
+.journal-main{display:flex;flex-direction:column;gap:8px;min-height:0;overflow:hidden;}
 .journal-date{font-size:1rem;font-weight:700;letter-spacing:-0.5px;}
-.journal-search{background:var(--s2);border:1px solid var(--border);color:var(--text);padding:7px 11px;border-radius:6px;font-size:0.78rem;outline:none;width:100%;font-family:'Inter',sans-serif;}
+.journal-search{background:var(--s2);border:1px solid var(--border);color:var(--text);padding:6px 11px;border-radius:6px;font-size:0.75rem;outline:none;width:100%;font-family:'Inter',sans-serif;}
 .journal-search:focus{border-color:var(--accent);}
-.journal-textarea{background:var(--s2);border:1px solid var(--border);color:var(--text);padding:14px;border-radius:8px;font-size:0.82rem;outline:none;width:100%;resize:vertical;min-height:200px;font-family:'Inter',sans-serif;line-height:1.6;}
+/* TOOLBAR */
+.journal-toolbar{display:flex;gap:4px;flex-wrap:wrap;padding:6px 8px;background:var(--s3);border-radius:6px;border:1px solid var(--border);}
+.jtool{background:none;border:1px solid var(--border);color:var(--muted);padding:3px 9px;border-radius:4px;cursor:pointer;font-size:0.7rem;font-family:'Inter',sans-serif;font-weight:500;transition:all 0.15s;white-space:nowrap;}
+.jtool:hover{border-color:var(--accent);color:var(--accent);}
+.jtool.active{background:var(--accent);color:#fff;border-color:var(--accent);}
+.jtool-sep{width:1px;background:var(--border);margin:2px 3px;}
+.journal-textarea{background:var(--s2);border:1px solid var(--border);color:var(--text);padding:14px 16px;border-radius:8px;font-size:0.84rem;outline:none;width:100%;resize:none;font-family:'Inter',sans-serif;line-height:1.7;flex:1;min-height:0;}
 .journal-textarea:focus{border-color:var(--accent);}
-.journal-save-status{font-size:0.65rem;color:var(--muted);text-align:right;}
-.search-results{background:var(--s2);border:1px solid var(--border);border-radius:7px;padding:10px;margin-top:8px;display:none;}
-.search-result-item{padding:7px 0;border-bottom:1px solid var(--border);cursor:pointer;}
+.journal-save-status{font-size:0.62rem;color:var(--muted);}
+.search-results{background:var(--s2);border:1px solid var(--border);border-radius:7px;padding:8px;display:none;max-height:160px;overflow-y:auto;}
+.search-result-item{padding:6px 0;border-bottom:1px solid var(--border);cursor:pointer;}
 .search-result-item:last-child{border-bottom:none;}
 .search-result-item:hover .sri-date{color:var(--accent);}
-.sri-date{font-size:0.7rem;font-weight:600;margin-bottom:3px;}
-.sri-preview{font-size:0.68rem;color:var(--muted);}
+.sri-date{font-size:0.68rem;font-weight:600;margin-bottom:2px;}
+.sri-preview{font-size:0.65rem;color:var(--muted);}
 
 /* NEWS */
 .news-item{padding:11px 0;border-bottom:1px solid var(--border);display:flex;gap:10px;}
@@ -939,25 +953,32 @@ tbody tr:last-child td{border-bottom:none;}
 </head>
 <body>
 
-<!-- TICKER STRIP — static 3 indices + PE ratio -->
+<!-- TICKER STRIP — PE Ratio first, then indices -->
 <div class="ticker-strip" id="tickerStrip">
-  <a class="ticker-item" href="https://www.tradingview.com/chart/?symbol=NSE%3ANIFTY" target="_blank">
+  <!-- PE RATIO — first item -->
+  <div class="ticker-item" style="cursor:default;border-right:1px solid var(--border)">
+    <span class="ticker-name">NIFTY P/E RATIO</span>
+    <span id="pe50" style="font-family:'DM Mono',monospace;font-size:0.72rem;font-weight:600;color:var(--warn)">—</span>
+  </div>
+  <!-- NIFTY 50 -->
+  <a class="ticker-item" href="https://www.tradingview.com/chart/?symbol=NSE%3ANIFTY" target="_blank" style="border-right:1px solid var(--border)">
     <span class="ticker-name">NIFTY 50</span>
     <span class="ticker-price" id="tn50">—</span>
     <span class="ticker-chg" id="tc50"></span>
-    <span class="ticker-pe" id="pe50" title="Nifty 50 P/E Ratio">PE —</span>
   </a>
-  <a class="ticker-item" href="https://www.tradingview.com/chart/?symbol=NSE%3AMIDCPNIFTY" target="_blank">
+  <!-- MIDCAP 100 -->
+  <a class="ticker-item" href="https://www.tradingview.com/chart/?symbol=NSE%3AMIDCPNIFTY" target="_blank" style="border-right:1px solid var(--border)">
     <span class="ticker-name">NIFTY MIDCAP 100</span>
     <span class="ticker-price" id="tnMid">—</span>
     <span class="ticker-chg" id="tcMid"></span>
   </a>
+  <!-- SMALLCAP 100 -->
   <a class="ticker-item" href="https://www.tradingview.com/chart/?symbol=NSE%3ANIFTYSMLCAP100" target="_blank">
     <span class="ticker-name">NIFTY SMALLCAP 100</span>
     <span class="ticker-price" id="tnSml">—</span>
     <span class="ticker-chg" id="tcSml"></span>
   </a>
-  <span style="margin-left:auto;font-size:0.58rem;color:var(--muted);padding-right:8px" id="tickerUpdated"></span>
+  <span style="margin-left:auto;font-size:0.55rem;color:var(--muted);padding-right:12px;flex-shrink:0" id="tickerUpdated"></span>
 </div>
 
 <header>
@@ -1112,35 +1133,73 @@ tbody tr:last-child td{border-bottom:none;}
         </label>
       </div>
     </div>
-    <!-- HORIZONTAL STACKED BAR — matches the reference image -->
-    <div style="margin-bottom:16px">
-      <canvas id="sectorChart" height="60"></canvas>
+    <div style="display:grid;grid-template-columns:280px 1fr;gap:20px;align-items:start">
+      <!-- PIE CHART -->
+      <div>
+        <canvas id="sectorChart" width="280" height="280"></canvas>
+        <div id="sectorLegend" style="margin-top:10px;display:flex;flex-direction:column;gap:4px"></div>
+      </div>
+      <!-- SECTOR LIST + DETAIL -->
+      <div>
+        <div id="sectorRows" style="margin-bottom:12px"></div>
+        <div id="sectorDetails" style="display:none;background:var(--s2);border-radius:8px;padding:14px;border:1px solid var(--border);margin-bottom:12px"></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px" id="sectorSummary"></div>
+      </div>
     </div>
-    <!-- SECTOR ROWS LIST -->
-    <div id="sectorRows" style="margin-bottom:14px"></div>
-    <!-- SELECTED SECTOR DETAIL -->
-    <div id="sectorDetails" style="display:none;background:var(--s2);border-radius:8px;padding:14px;border:1px solid var(--border);margin-bottom:12px"></div>
-    <!-- SUMMARY -->
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px" id="sectorSummary"></div>
   </div>
 </div>
 
 <!-- ══ PAGE: JOURNAL ══════════════════════════════════ -->
 <div class="page" id="page-journal">
   <div class="panel">
-    <div class="panel-title">Investment Journal</div>
+    <div class="panel-title" style="margin-bottom:10px">
+      Investment Journal
+      <div class="journal-save-status" id="journalSaveStatus"></div>
+    </div>
     <div class="journal-layout">
+
+      <!-- SIDEBAR: mini calendar -->
       <div class="journal-sidebar">
         <div class="journal-mini-cal" id="journalMiniCal"></div>
       </div>
+
+      <!-- MAIN: editor -->
       <div class="journal-main">
-        <div style="display:flex;align-items:center;justify-content:space-between">
+        <!-- Date + search row -->
+        <div style="display:flex;align-items:center;gap:10px">
           <div class="journal-date" id="journalDate"></div>
-          <div class="journal-save-status" id="journalSaveStatus"></div>
+          <input class="journal-search" id="journalSearch" placeholder="🔍 Search entries..." oninput="searchJournal(this.value)" style="max-width:260px">
         </div>
-        <input class="journal-search" id="journalSearch" placeholder="🔍 Search entries..." oninput="searchJournal(this.value)">
         <div class="search-results" id="searchResults"></div>
-        <textarea class="journal-textarea" id="journalEntry" placeholder="Write your thoughts, trade notes, market observations..." oninput="autoSaveJournal()"></textarea>
+
+        <!-- FORMATTING TOOLBAR -->
+        <div class="journal-toolbar">
+          <button class="jtool" onclick="jInsert('# ','',true)" title="Heading 1">H1</button>
+          <button class="jtool" onclick="jInsert('## ','',true)" title="Heading 2">H2</button>
+          <button class="jtool" onclick="jInsert('### ','',true)" title="Heading 3">H3</button>
+          <div class="jtool-sep"></div>
+          <button class="jtool" onclick="jWrap('**','**')" title="Bold"><strong>B</strong></button>
+          <button class="jtool" onclick="jWrap('_','_')" title="Italic"><em>I</em></button>
+          <button class="jtool" onclick="jWrap('~~','~~')" title="Strikethrough"><s>S</s></button>
+          <div class="jtool-sep"></div>
+          <button class="jtool" onclick="jInsert('• ','',true)" title="Bullet point">• Bullet</button>
+          <button class="jtool" onclick="jInsert('- [ ] ','',true)" title="Checkbox">☐ Todo</button>
+          <button class="jtool" onclick="jNumberedList()" title="Numbered list">1. List</button>
+          <div class="jtool-sep"></div>
+          <button class="jtool" onclick="jInsert('---
+','',true)" title="Divider">— Rule</button>
+          <button class="jtool" onclick="jInsert('> ','',true)" title="Quote">❝ Quote</button>
+          <button class="jtool" onclick="jInsert('📈 ','',true)" title="Trade note">📈 Trade</button>
+          <button class="jtool" onclick="jInsert('⚠️ ','',true)" title="Risk note">⚠️ Risk</button>
+          <button class="jtool" onclick="jInsert('💡 ','',true)" title="Idea">💡 Idea</button>
+          <div class="jtool-sep"></div>
+          <button class="jtool" onclick="jClear()" title="Clear entry" style="color:var(--loss)">✕ Clear</button>
+        </div>
+
+        <!-- TEXTAREA — fills remaining height -->
+        <textarea class="journal-textarea" id="journalEntry"
+          placeholder="Write your thoughts, trade notes, market observations...&#10;&#10;Use the toolbar above to add headers, bullet points, and more."
+          oninput="autoSaveJournal()"></textarea>
       </div>
     </div>
   </div>
@@ -1374,7 +1433,10 @@ async function updateIndexTickers(){
     setTicker('tnSml', 'tcSml', d.SMALLCAP);
     // PE ratio
     const peEl = document.getElementById('pe50');
-    if(peEl && d.NIFTY50?.pe) peEl.textContent = 'PE '+d.NIFTY50.pe.toFixed(1);
+    if(peEl){
+      if(d.NIFTY50?.pe) peEl.textContent = d.NIFTY50.pe.toFixed(1)+'x';
+      else peEl.textContent = '—';
+    }
     const upEl = document.getElementById('tickerUpdated');
     if(upEl) upEl.textContent = 'Updated '+new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
   }catch(e){ console.log('Ticker fetch failed:', e); }
@@ -1812,27 +1874,25 @@ function renderSectors(d){
   const totalVal   = holdings.reduce((s,h)=>s+h.current_value,0);
   const totalKey   = view==='value'?sectors.reduce((s,[,v])=>s+v.value,0):view==='invested'?sectors.reduce((s,[,v])=>s+v.invested,0):null;
 
-  // ── HORIZONTAL STACKED BAR ──────────────────────────
+  // ── PIE CHART ────────────────────────────────────────
   if(sectorChart) sectorChart.destroy();
-  const chartData = sectors.map(([,v])=> view==='value'?v.value:view==='invested'?v.invested:v.pl);
-  const absMax    = Math.max(...chartData.map(Math.abs));
+  const chartVals = sectors.map(([,v])=> view==='value'?v.value:view==='invested'?v.invested:Math.abs(v.pl));
 
   sectorChart = new Chart(document.getElementById('sectorChart'),{
-    type: 'bar',
+    type: 'doughnut',
     data:{
-      labels:['Allocation'],
-      datasets: sectors.map(([name,v],i)=>({
-        label: name,
-        data: [view==='value'?v.value:view==='invested'?v.invested:v.pl],
-        backgroundColor: COLORS[i%COLORS.length],
-        borderRadius: i===0?4:i===sectors.length-1?4:0,
-        borderSkipped: false,
-      }))
+      labels: sectors.map(([n])=>n),
+      datasets:[{
+        data: chartVals,
+        backgroundColor: COLORS.slice(0, sectors.length),
+        borderColor: isDark?'#0f1117':'#f4f6fb',
+        borderWidth: 2,
+        hoverOffset: 8,
+      }]
     },
     options:{
-      indexAxis:'y',
-      responsive:true,
-      maintainAspectRatio:true,
+      responsive: false,
+      cutout: '55%',
       plugins:{
         legend:{display:false},
         tooltip:{
@@ -1841,24 +1901,30 @@ function renderSectors(d){
           titleColor:isDark?'#7b82a8':'#9090a0',
           bodyColor:isDark?'#e8eaf6':'#1a1d2e',
           callbacks:{
-            title:()=>'',
             label:ctx=>{
-              const s=sectors[ctx.datasetIndex][1];
-              const pct=(s.value/totalVal*100).toFixed(1);
-              return ` ${ctx.dataset.label}: ${fmtL(ctx.raw)} (${pct}%)`;
+              const s=sectors[ctx.dataIndex][1];
+              const p=(s.value/totalVal*100).toFixed(1);
+              return [` ${ctx.label}: ${fmtL(ctx.raw)} (${p}%)`,
+                      ` P&L: ${s.pl>=0?'+':''}${fmtL(s.pl)}`];
             }
           }
         }
       },
-      scales:{
-        x:{display:false,stacked:true},
-        y:{display:false,stacked:true}
-      },
       onClick:(_,els)=>{
-        if(els.length) showSectorDetail(sectors[els[0].datasetIndex][0],sectors[els[0].datasetIndex][1],COLORS[els[0].datasetIndex%COLORS.length],totalVal);
+        if(els.length) showSectorDetail(sectors[els[0].index][0],sectors[els[0].index][1],COLORS[els[0].index%COLORS.length],totalVal);
       }
     }
   });
+
+  // Legend below pie
+  const legEl = document.getElementById('sectorLegend');
+  if(legEl) legEl.innerHTML = sectors.map(([name,v],i)=>`
+    <div style="display:flex;align-items:center;gap:6px;cursor:pointer;padding:2px 0" onclick="showSectorDetail('${name}',null,'${COLORS[i%COLORS.length]}',${totalVal})">
+      <div style="width:8px;height:8px;border-radius:50%;background:${COLORS[i%COLORS.length]};flex-shrink:0"></div>
+      <span style="font-size:0.65rem;flex:1">${name}</span>
+      <span style="font-size:0.62rem;font-family:'DM Mono',monospace;color:${v.pl>=0?'var(--gain)':'var(--loss)'}">${v.pl>=0?'+':''}${fmtL(v.pl)}</span>
+      <span style="font-size:0.6rem;color:var(--muted);width:32px;text-align:right">${(v.value/totalVal*100).toFixed(0)}%</span>
+    </div>`).join('');
 
   // ── SECTOR ROWS LIST ────────────────────────────────
   document.getElementById('sectorRows').innerHTML = sectors.map(([name,v],i)=>{
@@ -1934,6 +2000,53 @@ function loadJournalEntry(date){
   document.getElementById('journalSaveStatus').textContent=entry?'Saved':'No entry for this date';
 }
 
+// ── JOURNAL TOOLBAR ────────────────────────────────────
+function jInsert(prefix, suffix, newline){
+  const ta = document.getElementById('journalEntry');
+  const start = ta.selectionStart, end = ta.selectionEnd;
+  const before = ta.value.substring(0, start);
+  const sel    = ta.value.substring(start, end);
+  const after  = ta.value.substring(end);
+  const nl     = newline && before.length > 0 && !before.endsWith('\n') ? '\n' : '';
+  const insert = nl + prefix + sel + suffix;
+  ta.value = before + insert + after;
+  const pos = before.length + insert.length;
+  ta.setSelectionRange(pos, pos);
+  ta.focus();
+  autoSaveJournal();
+}
+
+function jWrap(prefix, suffix){
+  const ta = document.getElementById('journalEntry');
+  const start = ta.selectionStart, end = ta.selectionEnd;
+  const sel = ta.value.substring(start, end);
+  if(!sel){ jInsert(prefix, suffix, false); return; }
+  ta.value = ta.value.substring(0,start) + prefix + sel + suffix + ta.value.substring(end);
+  ta.setSelectionRange(start + prefix.length, end + prefix.length);
+  ta.focus();
+  autoSaveJournal();
+}
+
+function jClear(){
+  if(!confirm('Clear today\'s journal entry?')) return;
+  const ta = document.getElementById('journalEntry');
+  ta.value = '';
+  autoSaveJournal();
+}
+
+function jNumberedList(){
+  const ta = document.getElementById('journalEntry');
+  const before = ta.value.substring(0, ta.selectionStart);
+  // Find the last numbered item in text before cursor
+  const lines = before.split('\n');
+  let nextNum = 1;
+  for(let i = lines.length-1; i >= 0; i--){
+    const m = lines[i].match(/^(\d+)\./);
+    if(m){ nextNum = parseInt(m[1]) + 1; break; }
+  }
+  jInsert(nextNum + '. ', '', true);
+}
+
 function autoSaveJournal(){
   clearTimeout(journalSaveTimer);
   journalSaveTimer=setTimeout(()=>{
@@ -1946,13 +2059,36 @@ function autoSaveJournal(){
 }
 
 async function saveJournalToServer(){
-  try{await fetch('/api/journal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(journalData)});}
-  catch(e){}
+  // Always save to localStorage as primary (instant, reliable)
+  try{ localStorage.setItem('folio_journal_v1', JSON.stringify(journalData)); }catch(e){}
+  // Also save to server as backup
+  try{
+    const r = await fetch('/api/journal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(journalData)});
+    const d = await r.json();
+    if(d.ok) document.getElementById('journalSaveStatus').textContent = '✓ Saved ' + new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
+  }catch(e){
+    document.getElementById('journalSaveStatus').textContent = '✓ Saved locally';
+  }
 }
 
 async function loadJournalFromServer(){
-  try{const r=await fetch('/api/journal');if(r.ok)journalData=await r.json();}
-  catch(e){}
+  // Load from localStorage first (instant)
+  try{
+    const local = localStorage.getItem('folio_journal_v1');
+    if(local){ journalData = JSON.parse(local); }
+  }catch(e){}
+  // Then try to sync from server (may have newer entries from other devices)
+  try{
+    const r = await fetch('/api/journal');
+    if(r.ok){
+      const serverData = await r.json();
+      if(serverData && Object.keys(serverData).length > 0){
+        // Merge: server wins for dates not in local
+        journalData = {...journalData, ...serverData};
+        localStorage.setItem('folio_journal_v1', JSON.stringify(journalData));
+      }
+    }
+  }catch(e){}
 }
 
 function searchJournal(query){
