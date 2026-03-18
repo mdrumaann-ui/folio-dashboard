@@ -1568,33 +1568,32 @@ function toggleTheme(){
 }
 
 // ── BLUR TOGGLE ────────────────────────────────────────
+// Helper: wire click-to-peek on a container's blur-val elements
+function rewireBlurPeek(root){
+  const els = (root||document).querySelectorAll('.blur-val');
+  els.forEach(el=>{
+    if(el._blurClick) el.removeEventListener('click',el._blurClick);
+    if(!blurActive){el.style.cursor='';el.title='';el.classList.remove('peek');return;}
+    el.style.cursor='pointer';
+    el.title='Click to peek';
+    el._blurClick=function(e){
+      e.stopPropagation();
+      this.classList.toggle('peek');
+      if(this.classList.contains('peek')){
+        clearTimeout(this._peekTimer);
+        this._peekTimer=setTimeout(()=>this.classList.remove('peek'),2000);
+      }
+    };
+    el.addEventListener('click',el._blurClick);
+  });
+}
+
 function toggleBlur(){
   blurActive=!blurActive;
   document.body.classList.toggle('blur-mode',blurActive);
   const btn=document.getElementById('blurBtn');
   if(btn){btn.textContent=blurActive?'👁 Show ₹':'👁 Hide ₹';btn.style.borderColor=blurActive?'var(--warn)':'';btn.style.color=blurActive?'var(--warn)':'';}
-  // Wire up click-to-peek on all blur-val elements when blur is active
-  document.querySelectorAll('.blur-val').forEach(el=>{
-    if(blurActive){
-      el.style.cursor='pointer';
-      el.title='Click to peek';
-      el._blurClick = function(e){
-        e.stopPropagation();
-        this.classList.toggle('peek');
-        // Auto-rehide after 2s
-        if(this.classList.contains('peek')){
-          clearTimeout(this._peekTimer);
-          this._peekTimer=setTimeout(()=>this.classList.remove('peek'),2000);
-        }
-      };
-      el.addEventListener('click',el._blurClick);
-    } else {
-      el.style.cursor='';
-      el.title='';
-      el.classList.remove('peek');
-      if(el._blurClick){el.removeEventListener('click',el._blurClick);delete el._blurClick;}
-    }
-  });
+  rewireBlurPeek();
 }
 
 // ── NAV ────────────────────────────────────────────────
@@ -1706,7 +1705,6 @@ async function updateIndexTickers(){
     const r = await fetch('/api/ticker');
     const d = await r.json();
     function setTicker(priceId, chgId, data){
-      const pe = document.getElementById('pe50');
       const priceEl = document.getElementById(priceId);
       const chgEl   = document.getElementById(chgId);
       if(!data||!data.price) return;
@@ -1742,10 +1740,12 @@ function renderOverview(d){
 
   // ALERT
   const ab=document.getElementById('alertBanner');
-  if(rs.stop_investing){ab.className='alert alert-danger show';ab.innerHTML=`🚨 <strong>STOP INVESTING.</strong> Loss of ${fmtL(rs.actual_loss)} exceeds ${st.max_loss_pct}% limit on ₹${fmtL(p.total_capital)} total capital.`;}
-  else if(rs.loss_used_pct>70){ab.className='alert alert-warn show';ab.innerHTML=`⚠️ <strong>Caution.</strong> ${rs.loss_used_pct.toFixed(0)}% of loss budget used. Safety cushion: ${fmtL(rs.loss_remaining)}.`;}
+  if(rs.stop_investing){ab.className='alert alert-danger show';ab.innerHTML=`🚨 <strong>STOP INVESTING.</strong> Loss of <span class="blur-val">${fmtL(rs.actual_loss)}</span> exceeds ${st.max_loss_pct}% limit on total capital <span class="blur-val">₹${fmtL(p.total_capital)}</span>.`;}
+  else if(rs.loss_used_pct>70){ab.className='alert alert-warn show';ab.innerHTML=`⚠️ <strong>Caution.</strong> ${rs.loss_used_pct.toFixed(0)}% of loss budget used. Limit left: <span class="blur-val">${fmtL(rs.loss_remaining)}</span>.`;}
   else{ab.className='alert alert-ok show';ab.innerHTML=`✅ <strong>All clear.</strong> Within risk limits. Total capital: <span class="blur-val">${fmtL(p.total_capital)}</span> · Cash: <span class="blur-val">${fmtL(p.cash_available)}</span>`;}
 
+  // Re-wire blur peek on freshly injected blur-val spans in alert
+  if(blurActive) setTimeout(()=>rewireBlurPeek(document.getElementById('alertBanner')),0);
   // Daily P&L estimate (today's change = current value minus yesterday's snapshot)
   const hist=d.history||[];
   let dailyPL=0,dailyPct=0;
@@ -1873,6 +1873,8 @@ function renderOverview(d){
       </td>
     </tr>`;
   }).join('');
+  // Re-wire blur peek on all freshly rendered blur-val elements
+  if(blurActive) setTimeout(rewireBlurPeek, 0);
 }
 
 // ── GROWTH CHART ───────────────────────────────────────
@@ -2193,13 +2195,7 @@ function showCalDay(date, pl){
   document.getElementById('calDayDetailText').innerHTML=
     `<strong>${new Date(date).toLocaleDateString('en-IN',{day:'2-digit',month:'long',year:'numeric'})}</strong>
      — P&L: <span style="color:${pl>=0?'var(--gain)':'var(--loss)'}" class="blur-val"><strong>${pl>=0?'+':''}${fmtL(pl)}</strong></span>`;
-  // Re-wire blur click handler if blur is active
-  if(blurActive){
-    document.querySelectorAll('#calDayDetail .blur-val').forEach(el=>{
-      el.style.cursor='pointer'; el.title='Click to peek';
-      el.onclick=function(e){e.stopPropagation();this.classList.toggle('peek');if(this.classList.contains('peek')){clearTimeout(this._pt);this._pt=setTimeout(()=>this.classList.remove('peek'),2000);}};
-    });
-  }
+  if(blurActive) setTimeout(()=>rewireBlurPeek(detail),0);
 }
 
 function calNavYear(dir){
