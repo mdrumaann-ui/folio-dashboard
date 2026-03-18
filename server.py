@@ -476,11 +476,6 @@ def api_refresh():
     return jsonify({"ok": True, "message": "Cache cleared"})
 
 
-@app.route("/api/nifty-pe")
-def api_nifty_pe():
-    """PE is now fetched client-side by the browser. This stub returns empty."""
-    return jsonify({"pe": None, "note": "PE fetched client-side"}), 200
-
 
 @app.route("/api/ticker")
 def api_ticker():
@@ -1162,11 +1157,6 @@ tbody tr:last-child td{border-bottom:none;}
     </div>
     <div class="sg"><label>Max Loss %</label><input type="number" id="maxLoss" value="10" min="1" max="50" onchange="saveSettings();loadData()"></div>
     <div class="sg"><label>Per Stock Loss %</label><input type="number" id="posLoss" value="10" min="1" max="50" onchange="saveSettings();loadData()"></div>
-    <div class="sg" style="background:var(--s2);border:1px solid var(--border);border-radius:6px;padding:6px 10px;min-width:130px">
-      <div style="font-size:0.58rem;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin-bottom:3px">NIFTY P/E</div>
-      <div id="peDisplay" style="font-family:'DM Mono',monospace;font-size:0.82rem;font-weight:600;color:var(--warn)">—</div>
-      <div id="peNote" style="font-size:0.58rem;color:var(--muted);margin-top:1px">loading...</div>
-    </div>
     <span class="updated-lbl" id="updatedBar"></span>
   </div>
   <div class="alert" id="alertBanner"></div>
@@ -1613,59 +1603,6 @@ function showDashboard(name){
   }
 }
 let tickerTimer=null;
-// ── NIFTY PE — fetched directly by browser from Yahoo Finance ─────
-// The server has no internet access, so browser does this directly.
-async function fetchNiftyPE(){
-  const peDisp = document.getElementById('peDisplay');
-  const peNote = document.getElementById('peNote');
-  if(peDisp) peDisp.textContent = '…';
-
-  // Try Yahoo Finance quoteSummary directly from browser
-  const urls = [
-    'https://query1.finance.yahoo.com/v10/finance/quoteSummary/%5ENSEI?modules=summaryDetail',
-    'https://query2.finance.yahoo.com/v10/finance/quoteSummary/%5ENSEI?modules=summaryDetail',
-  ];
-  for(const url of urls){
-    try{
-      const r = await fetch(url, {headers:{'Accept':'application/json'}});
-      if(!r.ok) continue;
-      const d = await r.json();
-      const pe = d?.quoteSummary?.result?.[0]?.summaryDetail?.trailingPE?.raw;
-      if(pe){
-        displayPE(pe);
-        return;
-      }
-    }catch(e){}
-  }
-
-  // Try NSE India directly from browser (browser can handle the cookies/CORS better)
-  try{
-    // First get session cookies
-    await fetch('https://www.nseindia.com', {mode:'no-cors', credentials:'include'});
-    const r = await fetch('https://www.nseindia.com/api/allIndices', {
-      headers:{'Accept':'application/json','X-Requested-With':'XMLHttpRequest'},
-      credentials:'include'
-    });
-    if(r.ok){
-      const d = await r.json();
-      const item = (d?.data||[]).find(x=>x.index==='NIFTY 50');
-      if(item?.pe){ displayPE(parseFloat(item.pe)); return; }
-    }
-  }catch(e){}
-
-  // Nothing worked
-  if(peDisp) peDisp.textContent = '—';
-  if(peNote) peNote.textContent = 'unavailable';
-}
-
-function displayPE(pe){
-  const peDisp = document.getElementById('peDisplay');
-  const peNote = document.getElementById('peNote');
-  if(peDisp) peDisp.textContent = pe.toFixed(1)+'x';
-  const note = pe>25?'⚠️ Expensive':pe>22?'~ Fair value':pe>18?'✓ Reasonable':'✅ Cheap';
-  if(peNote) peNote.textContent = note;
-}
-
 function startAuto(){
   stopAuto();
   autoTimer=setInterval(loadData,60000);
@@ -2772,7 +2709,6 @@ window.addEventListener('load',()=>{
   loadSettings();
   loadStockRiskLimits();
   loadJournalFromServer();
-  fetchNiftyPE();
   checkAuth();
 });
 </script>
