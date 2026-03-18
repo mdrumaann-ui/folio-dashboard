@@ -1377,17 +1377,24 @@ tbody tr:last-child td{border-bottom:none;}
           <button class="ctool-btn" onclick="saveCanvasAsImage()" style="margin-left:auto">⬇ Save PNG</button>
         </div>
 
-        <!-- TEXTAREA (normal + ruled mode) -->
+        <!-- TEXTAREA (always visible) -->
         <div class="journal-ruled-wrap" id="journalRuledWrap">
           <div class="journal-ruled-lines" id="journalRuledLines" style="display:none"></div>
           <textarea class="journal-textarea" id="journalEntry"
-            placeholder="Write your thoughts, trade notes, market observations...&#10;&#10;Use the toolbar above. Click ✍️ to switch to handwriting/stylus canvas."
+            placeholder="Write your typed notes here...&#10;&#10;Switch to ✍️ Handwriting below to draw with your stylus. Both are saved together."
             oninput="autoSaveJournal()"></textarea>
         </div>
 
-        <!-- CANVAS (handwriting mode) -->
-        <div class="journal-canvas-wrap" id="journalCanvasWrap" style="display:none">
-          <canvas id="journalCanvas" height="600"></canvas>
+        <!-- CANVAS (handwriting mode — shown below textarea, not replacing it) -->
+        <div id="journalCanvasWrap" style="display:none;margin-top:8px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+            <div style="flex:1;height:1px;background:var(--border)"></div>
+            <span style="font-size:0.62rem;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:0.8px">✍️ Handwriting Canvas</span>
+            <div style="flex:1;height:1px;background:var(--border)"></div>
+          </div>
+          <div class="journal-canvas-wrap" id="journalCanvasInner">
+            <canvas id="journalCanvas" height="500"></canvas>
+          </div>
         </div>
       </div>
     </div>
@@ -2409,27 +2416,36 @@ let lastX=0, lastY=0;
 function toggleJournalHandwriting(){
   journalHandwriting=!journalHandwriting;
   const btn=document.getElementById('btnHandwriting');
-  const wrap=document.getElementById('journalRuledWrap');
   const canvasWrap=document.getElementById('journalCanvasWrap');
   const toolbar=document.getElementById('canvasToolbar');
   btn.classList.toggle('active',journalHandwriting);
+
   if(journalHandwriting){
-    wrap.style.display='none';
+    // Show canvas BELOW the textarea — don't hide text
     canvasWrap.style.display='block';
     toolbar.style.display='flex';
-    // Init canvas
-    initCanvas();
-    // Update canvas bg for theme
-    canvasWrap.classList.toggle('dark-canvas',isDark);
-    const ctx=document.getElementById('journalCanvas').getContext('2d');
-    // Adapt default pen color for dark/light
+    // Init canvas only if first time (don't wipe existing drawing)
+    if(!canvasCtx){
+      initCanvas();
+    } else {
+      // Just re-wire events in case canvas was resized or re-inserted
+      const canvas=document.getElementById('journalCanvas');
+      canvas.onpointerdown=canvasStart;
+      canvas.onpointermove=canvasDraw;
+      canvas.onpointerup=canvasEnd;
+      canvas.onpointerout=canvasEnd;
+      canvas.onpointercancel=canvasEnd;
+    }
+    // Adapt pen color for theme if still default
+    const inner=document.getElementById('journalCanvasInner');
+    if(inner) inner.classList.toggle('dark-canvas',isDark);
     if(isDark && canvasColor==='#1a1d27') setCanvasColorDirect('#e8eaf6');
   } else {
-    wrap.style.display='block';
+    // Hide canvas section — textarea was always visible
     canvasWrap.style.display='none';
     toolbar.style.display='none';
     btn.classList.remove('active');
-    // If was also in ruled mode, re-apply
+    // Re-apply ruled lines to textarea if enabled
     if(journalRuled) applyRuledLines();
   }
 }
@@ -2437,28 +2453,43 @@ function toggleJournalHandwriting(){
 function initCanvas(){
   const canvas=document.getElementById('journalCanvas');
   const wrap=document.getElementById('journalCanvasWrap');
-  // Set canvas resolution to match display
-  const w=wrap.clientWidth||700;
-  canvas.width=w;
-  canvas.height=600;
-  canvasCtx=canvas.getContext('2d');
-  canvasCtx.lineCap='round';
-  canvasCtx.lineJoin='round';
-  canvasCtx.strokeStyle=canvasColor;
-  canvasCtx.lineWidth=canvasPenSize;
-  // Fill background
-  canvasCtx.fillStyle=isDark?'#1e2030':'#fffef5';
-  canvasCtx.fillRect(0,0,canvas.width,canvas.height);
-  // Draw ruled lines if enabled
-  if(journalRuled) drawCanvasRuledLines();
-  // Save blank state
-  canvasHistory=[canvasCtx.getImageData(0,0,canvas.width,canvas.height)];
-  // Wire pointer events (works for mouse, touch, and stylus/S-Pen)
-  canvas.onpointerdown=canvasStart;
-  canvas.onpointermove=canvasDraw;
-  canvas.onpointerup=canvasEnd;
-  canvas.onpointerout=canvasEnd;
-  canvas.onpointercancel=canvasEnd;
+  // Set canvas resolution to match display width
+  const w = wrap.clientWidth || document.getElementById('journalRuledWrap').clientWidth || 700;
+  const isFirstInit = !canvasCtx;
+
+  // Only resize (which clears canvas) if this is first time
+  if(isFirstInit){
+    canvas.width = w;
+    canvas.height = 500;
+  } else if(canvas.width !== w && w > 0){
+    // Width changed (e.g. window resize) — save drawing, resize, restore
+    const saved = canvasCtx.getImageData(0,0,canvas.width,canvas.height);
+    canvas.width = w;
+    canvas.height = 500;
+    canvasCtx.putImageData(saved,0,0);
+  }
+
+  canvasCtx = canvas.getContext('2d');
+  canvasCtx.lineCap  = 'round';
+  canvasCtx.lineJoin = 'round';
+  canvasCtx.strokeStyle = canvasColor;
+  canvasCtx.lineWidth   = canvasPenSize;
+
+  if(isFirstInit){
+    // Fill background only on first init
+    canvasCtx.fillStyle = isDark ? '#1e2030' : '#fffef5';
+    canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
+    if(journalRuled) drawCanvasRuledLines();
+    // Save blank state as first history entry
+    canvasHistory = [canvasCtx.getImageData(0,0,canvas.width,canvas.height)];
+  }
+
+  // Wire pointer events (works for mouse, touch, and S-Pen stylus)
+  canvas.onpointerdown   = canvasStart;
+  canvas.onpointermove   = canvasDraw;
+  canvas.onpointerup     = canvasEnd;
+  canvas.onpointerout    = canvasEnd;
+  canvas.onpointercancel = canvasEnd;
 }
 
 function drawCanvasRuledLines(){
@@ -2584,9 +2615,13 @@ function toggleJournalRuled(){
   journalRuled=!journalRuled;
   const btn=document.getElementById('btnRuled');
   if(btn) btn.classList.toggle('active',journalRuled);
-  if(journalHandwriting){
-    // Redraw canvas with/without ruled lines
-    initCanvas();
+  if(journalHandwriting && canvasCtx){
+    // Draw lines OVER existing drawing (don't wipe canvas)
+    if(journalRuled) drawCanvasRuledLines();
+    // Save this state to history
+    const canvas=document.getElementById('journalCanvas');
+    canvasHistory.push(canvasCtx.getImageData(0,0,canvas.width,canvas.height));
+    if(canvasHistory.length>30) canvasHistory.shift();
   } else {
     applyRuledLines();
   }
@@ -2621,6 +2656,13 @@ function loadJournalEntry(date){
   const entry=journalData[date]||'';
   document.getElementById('journalEntry').value=entry;
   document.getElementById('journalSaveStatus').textContent=entry?'Saved':'No entry for this date';
+  // Reset canvas for new date — each date gets its own fresh canvas
+  // (canvas drawings are not yet persisted across sessions, only text is)
+  if(canvasCtx){
+    canvasCtx=null;
+    canvasHistory=[];
+    if(journalHandwriting) initCanvas();
+  }
 }
 
 // ── JOURNAL TOOLBAR ────────────────────────────────────
