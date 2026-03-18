@@ -166,22 +166,26 @@ def load_history():
         print(f"JSONBin load error: {e}")
         return {}
 
-def save_snapshot(total_value, total_cost, cash):
-    """Save today's snapshot to JSONBin. Once per day."""
+def save_snapshot(total_value, total_cost, cash, day_pl=0):
+    """Save/update today's snapshot. Updates day_pl on every call, other fields only once."""
     try:
         today   = date.today().isoformat()
         history = load_history()
         if today in history:
-            return  # already saved today
-        history[today] = {
-            "date":          today,
-            "value":         round(total_value, 2),
-            "invested":      round(total_cost, 2),
-            "cash":          round(cash, 2),
-            "total_capital": round(total_value + cash, 2),
-            "pl":            round(total_value - total_cost, 2),
-            "pl_pct":        round((total_value - total_cost) / total_cost * 100 if total_cost > 0 else 0, 2),
-        }
+            # Update day_pl each refresh so calendar shows today's real intraday P&L
+            history[today]["day_pl"] = round(day_pl, 2)
+            history[today]["value"]  = round(total_value, 2)  # keep value current too
+        else:
+            history[today] = {
+                "date":          today,
+                "value":         round(total_value, 2),
+                "invested":      round(total_cost, 2),
+                "cash":          round(cash, 2),
+                "total_capital": round(total_value + cash, 2),
+                "pl":            round(total_value - total_cost, 2),
+                "pl_pct":        round((total_value - total_cost) / total_cost * 100 if total_cost > 0 else 0, 2),
+                "day_pl":        round(day_pl, 2),
+            }
         if JSONBIN_BIN_ID and JSONBIN_API_KEY:
             data = json.dumps(history).encode()
             req  = urllib.request.Request(
@@ -194,7 +198,6 @@ def save_snapshot(total_value, total_cost, cash):
         else:
             with open("portfolio_history.json", "w") as f:
                 json.dump(history, f, indent=2)
-        print(f"Snapshot saved for {today}")
     except Exception as e:
         print(f"Could not save snapshot: {e}")
 
@@ -365,8 +368,8 @@ def api_summary():
         loss_used_pct = (actual_loss / max_loss_amt * 100) if max_loss_amt > 0 else 0
         stop_investing = actual_loss >= max_loss_amt
 
-        # Auto-save daily snapshot
-        save_snapshot(total_val, total_cost, cash_avail)
+        # Auto-save/update daily snapshot with today's real intraday P&L
+        save_snapshot(total_val, total_cost, cash_avail, day_pl=day_pl)
 
         # Trade stats
         try:
@@ -582,33 +585,61 @@ def api_ticker():
                 "change":    round(chg, 2),
                 "changePct": round(chgPct, 2),
             }
-            # PE ratio for Nifty 50 — fetch from NSE India public API
+            # PE ratio for Nifty 50 — cascade through multiple sources
             if name == "NIFTY50":
+                pe_val = None
+                # Source 1: NSE India allIndices (most accurate, needs cookie)
                 try:
-                    # NSE India public endpoint (no auth, free)
-                    nse_url = "https://www.nseindia.com/api/equity-meta-info?symbol=NIFTY%2050"
-                    nse_req = urllib.request.Request(nse_url, headers={
-                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                        "Accept": "application/json",
-                        "Referer": "https://www.nseindia.com/"
-                    })
-                    with urllib.request.urlopen(nse_req, timeout=6) as pr:
-                        nse_data = json.loads(pr.read().decode())
-                    pe = nse_data.get("pdSymbolPe") or nse_data.get("pe")
-                    if pe: entry["pe"] = round(float(pe), 1)
-                except:
-                    # Fallback 1: Yahoo Finance v10
+                    import http.cookiejar
+                    jar2 = http.cookiejar.CookieJar()
+                    opener2 = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar2))
+                    opener2.open(urllib.request.Request(
+                        "https://www.nseindia.com",
+                        headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36"}
+                    ), timeout=4)
+                    idx_req = urllib.request.Request(
+                        "https://www.nseindia.com/api/allIndices",
+                        headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                                 "Accept": "application/json", "Referer": "https://www.nseindia.com/",
+                                 "X-Requested-With": "XMLHttpRequest"}
+                    )
+                    with opener2.open(idx_req, timeout=6) as pr:
+                        idx_data = json.loads(pr.read().decode())
+                    for item in idx_data.get("data", []):
+                        if item.get("index") == "NIFTY 50" and item.get("pe"):
+                            pe_val = round(float(item["pe"]), 1)
+                            break
+                except: pass
+                # Source 2: Yahoo Finance quoteSummary
+                if not pe_val:
                     try:
-                        yf_url = "https://query2.finance.yahoo.com/v10/finance/quoteSummary/%5ENSEI?modules=summaryDetail"
-                        yf_req = urllib.request.Request(yf_url, headers={"User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64)","Accept":"application/json","Accept-Language":"en-US,en;q=0.9"})
-                        with urllib.request.urlopen(yf_req, timeout=6) as pr2:
+                        yf_req = urllib.request.Request(
+                            "https://query1.finance.yahoo.com/v10/finance/quoteSummary/%5ENSEI?modules=summaryDetail",
+                            headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
+                                     "Accept": "application/json", "Accept-Language": "en-US,en;q=0.9"}
+                        )
+                        with urllib.request.urlopen(yf_req, timeout=5) as pr2:
                             yf_data = json.loads(pr2.read().decode())
-                        pe2 = yf_data["quoteSummary"]["result"][0]["summaryDetail"].get("trailingPE",{}).get("raw")
-                        if pe2: entry["pe"] = round(pe2, 1)
-                    except:
-                        # Fallback 2: hardcoded note so UI shows something
-                        entry["pe"] = None
-                        entry["pe_note"] = "Visit nseindia.com"
+                        raw_pe = yf_data["quoteSummary"]["result"][0]["summaryDetail"].get("trailingPE", {}).get("raw")
+                        if raw_pe: pe_val = round(float(raw_pe), 1)
+                    except: pass
+                # Source 3: Screener.in
+                if not pe_val:
+                    try:
+                        sc_req = urllib.request.Request(
+                            "https://www.screener.in/api/company/NIFTY/chart/?q=Price+to+Earning&days=30",
+                            headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json",
+                                     "X-Requested-With": "XMLHttpRequest"}
+                        )
+                        with urllib.request.urlopen(sc_req, timeout=5) as pr3:
+                            sc_data = json.loads(pr3.read().decode())
+                        datasets = sc_data.get("datasets", [])
+                        if datasets and datasets[0].get("values"):
+                            latest = datasets[0]["values"][-1]
+                            if latest and len(latest) > 1:
+                                pe_val = round(float(latest[1]), 1)
+                    except: pass
+                entry["pe"] = pe_val
             result[name] = entry
         except Exception as e:
             result[name] = {"price": 0, "change": 0, "changePct": 0, "error": str(e)}
@@ -1716,25 +1747,9 @@ function showDashboard(name){
   }
 }
 let tickerTimer=null;
-async function fetchNiftyPE(){
-  try{
-    const r = await fetch('/api/nifty-pe');
-    const d = await r.json();
-    const peDisp = document.getElementById('peDisplay');
-    const peNote = document.getElementById('peNote');
-    if(d.pe && peDisp){
-      peDisp.textContent = d.pe.toFixed(1)+'x';
-      const pe = d.pe;
-      const note = pe > 25 ? '⚠️ Expensive' : pe > 20 ? '~ Fair value' : '✅ Cheap';
-      if(peNote) peNote.textContent = note + (d.pb ? ` · PB ${d.pb}x` : '');
-    } else if(peDisp){
-      peDisp.textContent = '—';
-      if(peNote) peNote.textContent = 'unavailable';
-    }
-  }catch(e){
-    const peNote = document.getElementById('peNote');
-    if(peNote) peNote.textContent = 'unavailable';
-  }
+function fetchNiftyPE(){
+  // PE is fetched as part of updateIndexTickers() via /api/ticker
+  // This is now a no-op — PE display is handled in updateIndexTickers
 }
 
 function startAuto(){
@@ -2145,22 +2160,23 @@ function renderHoldingsAnalytics(d){
 // ── CALENDAR — full year heatmap like GitHub ───────────
 function buildDayPLMap(history){
   const plMap={};
-  // history[i].pl is TOTAL unrealised P&L on that day
-  // daily change = today's portfolio value minus yesterday's portfolio value
   history.forEach((h,i)=>{
-    const dayPL = i>0
-      ? (h.value||0) - (history[i-1].value||0)  // value change = actual daily gain/loss
-      : 0;
+    // Use day_pl from snapshot if available (accurate intraday from Kite close_price)
+    // Fallback: value change vs previous day snapshot
+    const dayPL = h.day_pl !== undefined
+      ? h.day_pl
+      : (i>0 ? (h.value||0) - (history[i-1].value||0) : 0);
     plMap[h.date] = {pl: Math.round(dayPL), value: h.value, totalPL: h.pl};
   });
-  // Also mark today from last data
+  // Also use live data for today if available
   if(lastData){
     const today = new Date().toISOString().split('T')[0];
-    if(!plMap[today] && history.length>0){
-      const last = history[history.length-1];
-      const dayPL = (lastData.portfolio.total_value||0) - (last.value||0);
-      plMap[today] = {pl: Math.round(dayPL), value: lastData.portfolio.total_value, totalPL: lastData.portfolio.total_pl};
-    }
+    const liveDay = lastData.portfolio.day_pl || 0;
+    plMap[today] = {
+      pl: Math.round(liveDay),
+      value: lastData.portfolio.total_value,
+      totalPL: lastData.portfolio.total_pl
+    };
   }
   return plMap;
 }
@@ -2185,12 +2201,11 @@ function renderCalendar(){
   const today   = new Date();
   document.getElementById('calYearLabel').textContent = year;
 
-  // If no history yet, show today's P&L from live data
+  // If no history yet, show today's day_pl from live data
   if(lastData && history.length === 0){
     const todayStr = today.toISOString().split('T')[0];
     const p = lastData.portfolio;
-    // Use total P&L as today's indicator
-    if(p.total_pl !== 0) plMap[todayStr] = {pl: p.total_pl, value: p.total_value};
+    if(p.day_pl) plMap[todayStr] = {pl: Math.round(p.day_pl), value: p.total_value};
   }
 
   // Calculate max abs P&L for intensity scaling
