@@ -1010,6 +1010,42 @@ tbody tr:last-child td{border-bottom:none;}
 .news-title a{color:var(--text);text-decoration:none;}
 .news-title a:hover{color:var(--accent);}
 
+/* BLUR MODE */
+.blur-mode .blur-val{filter:blur(5px);user-select:none;transition:filter 0.2s;}
+.blur-mode .blur-val:hover{filter:blur(0);}
+
+/* NEWS TAGS */
+.news-tag{display:inline-block;font-size:0.58rem;font-weight:700;padding:1px 6px;border-radius:3px;margin-right:3px;letter-spacing:0.3px;}
+.tag-up{background:rgba(0,230,118,0.15);color:var(--gain);}
+.tag-dn{background:rgba(255,82,82,0.15);color:var(--loss);}
+.tag-neutral{background:var(--s3);color:var(--muted);}
+.tag-announce{background:rgba(108,99,255,0.15);color:var(--accent);}
+.tag-quarterly{background:rgba(255,171,64,0.15);color:var(--warn);}
+.tag-dividend{background:rgba(0,230,118,0.15);color:var(--gain);}
+.tag-split{background:rgba(108,99,255,0.15);color:var(--accent);}
+.tag-bonus{background:rgba(255,171,64,0.15);color:var(--warn);}
+.news-filter-bar{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px;align-items:center;}
+.nfbtn{font-size:0.65rem;padding:3px 9px;border-radius:4px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;transition:all 0.15s;font-family:'Inter',sans-serif;}
+.nfbtn.active{background:var(--accent);color:#fff;border-color:var(--accent);}
+.nf-ticker-wrap{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px;}
+.nf-ticker-btn{font-size:0.6rem;padding:2px 7px;border-radius:3px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;transition:all 0.15s;}
+.nf-ticker-btn.active{background:var(--s3);color:var(--text);border-color:var(--accent);}
+
+/* EARNINGS/EVENTS */
+.event-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);font-size:0.74rem;}
+.event-row:last-child{border-bottom:none;}
+.event-date{font-family:'DM Mono',monospace;font-size:0.65rem;color:var(--muted);min-width:70px;}
+.event-ticker{font-weight:700;min-width:80px;color:var(--accent);}
+.event-type{font-size:0.6rem;padding:2px 6px;border-radius:3px;font-weight:600;}
+.ev-earnings{background:rgba(255,171,64,0.15);color:var(--warn);}
+.ev-dividend{background:rgba(0,230,118,0.15);color:var(--gain);}
+.ev-split{background:rgba(108,99,255,0.15);color:var(--accent);}
+.ev-bonus{background:rgba(255,112,67,0.15);color:var(--orange);}
+
+/* SELL BUTTON */
+.sell-btn{font-size:0.58rem;padding:2px 7px;border-radius:3px;border:1px solid rgba(255,82,82,0.5);background:rgba(255,82,82,0.08);color:var(--loss);cursor:pointer;font-family:'Inter',sans-serif;font-weight:600;text-decoration:none;transition:all 0.15s;}
+.sell-btn:hover{background:rgba(255,82,82,0.2);}
+
 /* RESPONSIVE for 1080p laptop */
 @media(max-width:1366px){
   .cards-row{grid-template-columns:repeat(3,1fr);}
@@ -1057,6 +1093,8 @@ tbody tr:last-child td{border-bottom:none;}
       <span id="liveName">Live</span>
     </div>
     <span id="updatedLbl" style="font-size:0.64rem;color:var(--muted)"></span>
+    <a href="https://kite.zerodha.com" target="_blank" class="btn" id="kiteBtn" style="display:none;text-decoration:none" title="Open Kite">⚡ Kite</a>
+    <button class="btn" id="blurBtn" onclick="toggleBlur()" style="display:none" title="Blur/unblur ₹ values">👁 Hide ₹</button>
     <button class="btn" id="refreshBtn" onclick="forceRefresh()" style="display:none">↻ Refresh</button>
     <button class="btn" id="logoutBtn" onclick="logout()" style="display:none">Disconnect</button>
     <div class="theme-btn" onclick="toggleTheme()" title="Toggle day/night">🌙</div>
@@ -1138,7 +1176,7 @@ tbody tr:last-child td{border-bottom:none;}
     <div class="tbl-wrap">
       <table>
         <thead><tr>
-          <th>Stock</th><th>Qty</th><th>Avg</th><th>LTP</th><th>Invested ₹</th><th>Current ₹</th><th>P&L ₹</th><th>Return</th><th>Weight</th><th>Risk</th>
+          <th>Stock</th><th>Qty</th><th>Avg</th><th>LTP</th><th>Invested ₹</th><th>Current ₹</th><th>P&L ₹</th><th>Return</th><th>Weight</th><th>% Risk</th><th>Risk/Sell</th>
         </tr></thead>
         <tbody id="holdTbody"></tbody>
       </table>
@@ -1283,10 +1321,81 @@ tbody tr:last-child td{border-bottom:none;}
 
 <!-- ══ PAGE: NEWS ═════════════════════════════════════ -->
 <div class="page" id="page-news">
-  <div class="panel">
-    <div class="panel-title">Stock News <span id="newsNote">for your holdings</span></div>
-    <div id="newsContainer">
-      <div style="text-align:center;padding:30px;color:var(--muted);font-size:0.78rem">Loading news...</div>
+  <!-- SUB-TABS -->
+  <div style="display:flex;gap:4px;margin-bottom:12px;border-bottom:1px solid var(--border);padding-bottom:0">
+    <button class="nav-tab active" id="nstab-news" onclick="switchNewsTab('news',this)" style="font-size:0.7rem;padding:7px 14px">📰 Stock News</button>
+    <button class="nav-tab" id="nstab-twitter" onclick="switchNewsTab('twitter',this)" style="font-size:0.7rem;padding:7px 14px">🐦 @Prakashplutus</button>
+    <button class="nav-tab" id="nstab-events" onclick="switchNewsTab('events',this)" style="font-size:0.7rem;padding:7px 14px">📆 Upcoming Events</button>
+  </div>
+
+  <!-- STOCK NEWS SUB-PAGE -->
+  <div id="nspage-news">
+    <div class="panel">
+      <div class="panel-title">Stock News <span id="newsNote">for your holdings</span></div>
+      <!-- TAG FILTERS -->
+      <div class="news-filter-bar">
+        <span style="font-size:0.6rem;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:0.5px">Filter:</span>
+        <button class="nfbtn active" onclick="setNewsTagFilter('all',this)">All</button>
+        <button class="nfbtn" onclick="setNewsTagFilter('target_up',this)">🎯 Target ↑</button>
+        <button class="nfbtn" onclick="setNewsTagFilter('target_dn',this)">📉 Target ↓</button>
+        <button class="nfbtn" onclick="setNewsTagFilter('neutral',this)">Neutral</button>
+        <button class="nfbtn" onclick="setNewsTagFilter('announcement',this)">📢 Announce</button>
+        <button class="nfbtn" onclick="setNewsTagFilter('quarterly',this)">📊 Quarterly</button>
+        <button class="nfbtn" onclick="setNewsTagFilter('dividend',this)">💰 Dividend</button>
+        <button class="nfbtn" onclick="setNewsTagFilter('split',this)">✂️ Split</button>
+        <button class="nfbtn" onclick="setNewsTagFilter('bonus',this)">🎁 Bonus</button>
+      </div>
+      <!-- TICKER FILTER -->
+      <div class="nf-ticker-wrap" id="newsTickerFilter"></div>
+      <div id="newsContainer">
+        <div style="text-align:center;padding:30px;color:var(--muted);font-size:0.78rem">Loading news...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TWITTER SUB-PAGE -->
+  <div id="nspage-twitter" style="display:none">
+    <div class="panel">
+      <div class="panel-title">@Prakashplutus — Twitter / X Feed</div>
+      <div style="text-align:center;padding:20px 0 10px">
+        <a href="https://twitter.com/Prakashplutus" target="_blank"
+           style="display:inline-flex;align-items:center;gap:8px;background:var(--s2);border:1px solid var(--border);color:var(--text);padding:9px 18px;border-radius:7px;text-decoration:none;font-size:0.8rem;font-weight:600;transition:all 0.15s"
+           onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--border)'">
+          <span style="font-size:1.1rem">𝕏</span> Open @Prakashplutus on Twitter/X
+        </a>
+      </div>
+      <div style="margin-top:12px">
+        <div style="font-size:0.65rem;color:var(--muted);margin-bottom:10px;text-align:center">Embedded timeline · Live tweets from @Prakashplutus</div>
+        <div style="border:1px solid var(--border);border-radius:8px;overflow:hidden;min-height:400px;background:var(--s2)">
+          <a class="twitter-timeline"
+             id="twtTimelineEmbed"
+             data-height="600"
+             data-chrome="noheader nofooter transparent"
+             href="https://twitter.com/Prakashplutus?ref_src=twsrc%5Etfw">Tweets by Prakashplutus</a>
+          <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"><\/script>
+        </div>
+      </div>
+      <div style="margin-top:12px;padding:10px;background:var(--s2);border-radius:6px;border:1px solid var(--border)">
+        <div style="font-size:0.65rem;color:var(--muted);margin-bottom:6px;font-weight:600">Quick Links</div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px">
+          <a href="https://twitter.com/Prakashplutus" target="_blank" style="font-size:0.7rem;color:var(--accent);text-decoration:none">→ Profile</a>
+          <a href="https://twitter.com/search?q=from%3APrakashplutus+stock&f=live" target="_blank" style="font-size:0.7rem;color:var(--accent);text-decoration:none">→ Stock tweets</a>
+          <a href="https://twitter.com/search?q=from%3APrakashplutus+buy&f=live" target="_blank" style="font-size:0.7rem;color:var(--accent);text-decoration:none">→ Buy calls</a>
+          <a href="https://twitter.com/search?q=from%3APrakashplutus+target&f=live" target="_blank" style="font-size:0.7rem;color:var(--accent);text-decoration:none">→ Targets</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- UPCOMING EVENTS SUB-PAGE -->
+  <div id="nspage-events" style="display:none">
+    <div class="panel">
+      <div class="panel-title">Upcoming Events <span id="eventsNote">for your portfolio</span>
+        <button onclick="loadUpcomingEvents()" style="font-size:0.65rem;padding:3px 9px;border-radius:4px;border:1px solid var(--border);background:transparent;color:var(--accent);cursor:pointer">↻ Refresh</button>
+      </div>
+      <div id="eventsContainer">
+        <div style="text-align:center;padding:30px;color:var(--muted);font-size:0.78rem">Click Upcoming Events tab to load...</div>
+      </div>
     </div>
   </div>
 </div>
@@ -1319,6 +1428,7 @@ let lastData=null, stockRiskLimits={}, riskModalTicker='';
 let journalData={}, journalCurrentDate='', journalSaveTimer=null;
 let calCurrentYear=new Date().getFullYear(), calCurrentMonth=new Date().getMonth();
 let activeSectors=new Set();
+let blurActive=false, newsTagFilter='all', newsTickerFilter='all';
 // NSE Sector Map — comprehensive list of NSE-listed stocks by sector
 // Add your specific holdings here if missing
 const SECTOR_MAP = {
@@ -1331,7 +1441,7 @@ const SECTOR_MAP = {
   'KIRLOSENG':'Capital Goods','KIRLOSBROS':'Capital Goods','KIRLOSKAR':'Capital Goods',
   'GVT&D':'Capital Goods','GVTD':'Capital Goods',
   'MBAPL':'Capital Goods',
-  'ANURAS':'FMCG & Consumer',
+  'ANURAS':'Chemicals',  // Anupam Rasayan India — Specialty Chemicals
   'VENUSREM':'Pharma & Healthcare',
   // Financial Services
   'HDFCBANK':'Financial Services','SBIN':'Financial Services','ICICIBANK':'Financial Services',
@@ -1383,9 +1493,12 @@ const SECTOR_MAP = {
   // Consumer Durables
   'HAVELLS':'Consumer Durables','VOLTAS':'Consumer Durables','WHIRLPOOL':'Consumer Durables',
   'BLUESTARCO':'Consumer Durables','CROMPTON':'Consumer Durables','AMBER':'Consumer Durables',
-  // Chemicals
+  // Chemicals — Specialty & Agrochemicals
+  'ANURAS':'Chemicals','ANUPAMR':'Chemicals','ANUPAM':'Chemicals',
   'PIDILITIND':'Chemicals','ASIANPAINT':'Chemicals','BERGEPAINT':'Chemicals',
   'AARTIIND':'Chemicals','DEEPAKNTR':'Chemicals','VINATIORGA':'Chemicals',
+  'CLEAN':'Chemicals','ROSSARI':'Chemicals','TATACHEM':'Chemicals',
+  'NOCIL':'Chemicals','ALKYLAMINE':'Chemicals','FINEORG':'Chemicals',
   // Insurance
   'HDFCLIFE':'Insurance','SBILIFE':'Insurance','ICICIGI':'Insurance',
   'ICICIPRULI':'Insurance','LICI':'Insurance','GICRE':'Insurance',
@@ -1431,6 +1544,14 @@ function toggleTheme(){
   if(lastData)renderGrowthChart(lastData);
 }
 
+// ── BLUR TOGGLE ────────────────────────────────────────
+function toggleBlur(){
+  blurActive=!blurActive;
+  document.body.classList.toggle('blur-mode',blurActive);
+  const btn=document.getElementById('blurBtn');
+  if(btn){btn.textContent=blurActive?'👁 Show ₹':'👁 Hide ₹';btn.style.borderColor=blurActive?'var(--warn)':'';btn.style.color=blurActive?'var(--warn)':'';}
+}
+
 // ── NAV ────────────────────────────────────────────────
 function showPage(name){
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
@@ -1471,6 +1592,8 @@ function showDashboard(name){
   document.getElementById('liveName').textContent=(name||'')+' · Live';
   document.getElementById('refreshBtn').style.display='inline-block';
   document.getElementById('logoutBtn').style.display='inline-block';
+  document.getElementById('blurBtn').style.display='inline-block';
+  document.getElementById('kiteBtn').style.display='inline-block';
   document.getElementById('footerUser').textContent=name||'';
 }
 let tickerTimer=null;
@@ -1569,33 +1692,54 @@ function renderOverview(d){
   const ab=document.getElementById('alertBanner');
   if(rs.stop_investing){ab.className='alert alert-danger show';ab.innerHTML=`🚨 <strong>STOP INVESTING.</strong> Loss of ${fmtL(rs.actual_loss)} exceeds ${st.max_loss_pct}% limit on ₹${fmtL(p.total_capital)} total capital.`;}
   else if(rs.loss_used_pct>70){ab.className='alert alert-warn show';ab.innerHTML=`⚠️ <strong>Caution.</strong> ${rs.loss_used_pct.toFixed(0)}% of loss budget used. Safety cushion: ${fmtL(rs.loss_remaining)}.`;}
-  else{ab.className='alert alert-ok show';ab.innerHTML=`✅ <strong>All clear.</strong> Within risk limits. Total capital: ${fmtL(p.total_capital)} · Cash: ${fmtL(p.cash_available)}`;}
+  else{ab.className='alert alert-ok show';ab.innerHTML=`✅ <strong>All clear.</strong> Within risk limits. Total capital: <span class="blur-val">${fmtL(p.total_capital)}</span> · Cash: <span class="blur-val">${fmtL(p.cash_available)}</span>`;}
 
-  // CARDS
+  // Daily P&L estimate (today's change = current value minus yesterday's snapshot)
+  const hist=d.history||[];
+  let dailyPL=0,dailyPct=0;
+  if(hist.length>=1){
+    const yest=hist[hist.length-1];
+    dailyPL=p.total_value-(yest.value||p.total_value);
+    dailyPct=yest.value>0?(dailyPL/yest.value*100):0;
+  }
+
+  // CARDS — blur-val on ₹ amounts; keep % visible; exclude Avg/LTP (those are in table)
   document.getElementById('cardsRow').innerHTML=[
-    ['Live Value',fmtL(p.total_value),null,null],
-    ['Total Capital',fmtL(p.total_capital),'Holdings + Cash',null],
-    ['Invested',fmtL(p.total_cost),p.holdings_count+' stocks',null],
-    ['P&L',(p.total_pl>=0?'+':'')+fmtL(p.total_pl),pct(p.total_pl_pct),gc(p.total_pl)],
-    ['P&L vs Target',pct(p.total_pl_pct),'Target: '+st.cagr_target+'%',p.total_pl_pct>=st.cagr_target?'g':'w'],
-    ['Cash',fmtL(p.cash_available),'Available',null],
+    ['Live Value',`<span class="blur-val">${fmtL(p.total_value)}</span>`,null,null],
+    ['Total Capital',`<span class="blur-val">${fmtL(p.total_capital)}</span>`,'Holdings + Cash',null],
+    ['Invested',`<span class="blur-val">${fmtL(p.total_cost)}</span>`,p.holdings_count+' stocks',null],
+    ['P&L',`<span class="blur-val">${(p.total_pl>=0?'+':'')+fmtL(p.total_pl)}</span>`,pct(p.total_pl_pct),gc(p.total_pl)],
+    ['Today\'s P&L',`<span class="blur-val">${(dailyPL>=0?'+':'')+fmtL(dailyPL)}</span>`,pct(dailyPct,2),gc(dailyPL)],
+    ['Cash',`<span class="blur-val">${fmtL(p.cash_available)}</span>`,'Available',null],
   ].map(([l,v,s,c])=>`<div class="card"><div class="card-lbl">${l}</div><div class="card-val ${c||''}">${v}</div>${s?`<div class="card-sub">${s}</div>`:''}</div>`).join('');
 
-  // PROFIT TARGET PANEL — met when P&L% >= target%
+  // PROFIT TARGET PANEL — projected value = cost × (1 + target/100)
   const profitMet = p.total_pl_pct >= st.cagr_target;
   const progW     = Math.min(p.total_pl_pct / Math.max(st.cagr_target,1) * 100, 100);
   const progClr   = profitMet ? 'var(--gain)' : p.total_pl_pct > st.cagr_target*0.7 ? 'var(--warn)' : p.total_pl_pct > 0 ? 'var(--warn)' : 'var(--loss)';
   const remaining = (st.cagr_target - p.total_pl_pct).toFixed(1);
+  const projectedVal = p.total_cost * (1 + st.cagr_target/100);
+  const neededGain = projectedVal - p.total_value;
   document.getElementById('cagrPanel').innerHTML=`
-    <div style="text-align:center;padding:10px 0 8px">
+    <div style="text-align:center;padding:10px 0 6px">
       <div class="cagr-num" style="color:${progClr}">${p.total_pl_pct.toFixed(1)}%</div>
       <div style="font-size:0.68rem;color:var(--muted);margin-top:4px">${profitMet ? '🎯 Profit target reached!' : 'Need '+remaining+'% more to hit '+st.cagr_target+'% target'}</div>
     </div>
     <div class="cagr-bar-wrap"><div class="cagr-bar-fill" style="width:${progW}%;background:${progClr}"></div></div>
+    <div style="margin:8px 0 4px;padding:8px 10px;background:var(--s2);border-radius:6px;border:2px solid ${progClr};display:flex;justify-content:space-between;align-items:center">
+      <div>
+        <div style="font-size:0.57rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.8px;margin-bottom:2px">🎯 Target Portfolio Value</div>
+        <div style="font-size:1rem;font-weight:800;color:${progClr}" class="blur-val">${fmtL(projectedVal)}</div>
+      </div>
+      <div style="text-align:right">
+        <div style="font-size:0.57rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.8px;margin-bottom:2px">${profitMet?'Exceeded by':'Still need'}</div>
+        <div style="font-size:0.88rem;font-weight:700;color:${profitMet?'var(--gain)':'var(--loss)'}" class="blur-val">${profitMet?'+'+fmtL(p.total_value-projectedVal):fmtL(neededGain)}</div>
+      </div>
+    </div>
     <div class="cagr-stats">
       <div class="cagr-stat"><div class="val" style="color:${gclr(p.total_pl_pct)}">${pct(p.total_pl_pct)}</div><div class="lbl">P&L %</div></div>
       <div class="cagr-stat"><div class="val">${st.cagr_target}%</div><div class="lbl">Target</div></div>
-      <div class="cagr-stat"><div class="val" style="color:${gclr(p.total_pl)}">${p.total_pl>=0?'+':''}${fmtL(p.total_pl)}</div><div class="lbl">P&L ₹</div></div>
+      <div class="cagr-stat"><div class="val blur-val" style="color:${gclr(p.total_pl)}">${p.total_pl>=0?'+':''}${fmtL(p.total_pl)}</div><div class="lbl">P&L ₹</div></div>
       <div class="cagr-stat" style="border:1px solid ${progClr}40"><div class="val" style="color:${progClr}">${profitMet?'✓ Met':remaining+'% left'}</div><div class="lbl">Gap</div></div>
     </div>`;
 
@@ -1616,19 +1760,19 @@ function renderOverview(d){
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:7px">
       <div style="background:var(--s2);border-radius:5px;padding:8px;text-align:center">
         <div style="font-size:0.6rem;color:var(--muted);margin-bottom:2px">TOTAL CAPITAL</div>
-        <div style="font-weight:700;font-size:0.82rem">${fmtL(p.total_capital)}</div>
+        <div style="font-weight:700;font-size:0.82rem" class="blur-val">${fmtL(p.total_capital)}</div>
       </div>
       <div style="background:var(--s2);border-radius:5px;padding:8px;text-align:center">
         <div style="font-size:0.6rem;color:var(--muted);margin-bottom:2px">MAX LOSS</div>
-        <div style="font-weight:700;font-size:0.82rem;color:var(--loss)">${fmtL(rs.max_loss_amt)}</div>
+        <div style="font-weight:700;font-size:0.82rem;color:var(--loss)" class="blur-val">${fmtL(rs.max_loss_amt)}</div>
       </div>
       <div style="background:var(--s2);border-radius:5px;padding:8px;text-align:center">
         <div style="font-size:0.6rem;color:var(--muted);margin-bottom:2px">CURRENT LOSS</div>
-        <div style="font-weight:700;font-size:0.82rem;color:${rs.actual_loss>0?'var(--loss)':'var(--gain)'}">${rs.actual_loss>0?fmtL(rs.actual_loss):'None'}</div>
+        <div style="font-weight:700;font-size:0.82rem;color:${rs.actual_loss>0?'var(--loss)':'var(--gain)'}" class="blur-val">${rs.actual_loss>0?fmtL(rs.actual_loss):'None'}</div>
       </div>
       <div style="background:var(--s2);border-radius:5px;padding:8px;text-align:center;border:1px solid ${rClr}40">
         <div style="font-size:0.6rem;color:var(--muted);margin-bottom:2px">SAFETY CUSHION</div>
-        <div style="font-weight:700;font-size:0.82rem;color:${rClr}">${fmtL(rs.loss_remaining)}</div>
+        <div style="font-weight:700;font-size:0.82rem;color:${rClr}" class="blur-val">${fmtL(rs.loss_remaining)}</div>
       </div>
     </div>
     ${rs.breaching_count>0?`<div style="margin-top:8px;padding:7px 10px;background:var(--loss-bg);border-radius:5px;border-left:3px solid var(--loss);font-size:0.7rem;color:var(--loss)">⚠ ${rs.breaching_count} stock${rs.breaching_count>1?'s':''} breaching limit</div>`:''}`;
@@ -1647,19 +1791,24 @@ function renderOverview(d){
     const badge=h.pnl_pct>=0?`<span class="sri-badge badge-ok">OK</span>`:ratio>=1?`<span class="sri-badge badge-bad">🔴 SELL</span>`:ratio>=0.8?`<span class="sri-badge badge-orange">🟠 SELL SOON</span>`:ratio>=0.5?`<span class="sri-badge badge-warn">🟡 WATCH</span>`:`<span class="sri-badge badge-ok">🟢 OK</span>`;
     const exchange=h.exchange||'NSE';
     const tvUrl=`https://www.tradingview.com/chart/?symbol=${exchange}%3A${h.tradingsymbol}`;
+    const kiteUrl=`https://kite.zerodha.com/positions`;
     const isCustom=stockRiskLimits[h.tradingsymbol]!==undefined;
+    // % Risk = how much of position is at risk (stop-loss distance as % of invested)
+    const riskPct = h.pnl_pct < 0 ? Math.abs(h.pnl_pct).toFixed(1) : '0.0';
+    const riskColor = ratio>=1?'var(--loss)':ratio>=0.8?'var(--orange)':ratio>=0.5?'var(--warn)':'var(--gain)';
     return `<tr>
       <td><a href="${tvUrl}" target="_blank" style="text-decoration:none;display:flex;align-items:center;gap:3px"><span class="tk tv-link">${h.tradingsymbol}</span><span style="font-size:0.55rem;color:var(--muted)">↗</span></a></td>
       <td>${h.quantity}</td>
       <td>₹${(h.average_price||0).toLocaleString('en-IN',{maximumFractionDigits:0})}</td>
       <td>₹${(h.last_price||0).toLocaleString('en-IN',{maximumFractionDigits:0})}</td>
-      <td><strong>₹${Math.round(h.invested_value).toLocaleString('en-IN')}</strong></td>
-      <td>₹${Math.round(h.current_value).toLocaleString('en-IN')}</td>
-      <td class="${gc(h.pnl)}">${h.pnl>=0?'+':'-'}₹${Math.abs(Math.round(h.pnl)).toLocaleString('en-IN')}</td>
+      <td class="blur-val"><strong>₹${Math.round(h.invested_value).toLocaleString('en-IN')}</strong></td>
+      <td class="blur-val">₹${Math.round(h.current_value).toLocaleString('en-IN')}</td>
+      <td class="${gc(h.pnl)} blur-val">${h.pnl>=0?'+':'-'}₹${Math.abs(Math.round(h.pnl)).toLocaleString('en-IN')}</td>
       <td class="${gc(h.pnl_pct)}">${pct(h.pnl_pct)}</td>
       <td class="m">${h.weight_pct}%</td>
+      <td style="color:${riskColor};font-family:'DM Mono',monospace;font-weight:600">${riskPct}%</td>
       <td>
-        <div style="display:flex;align-items:center;gap:3px">${badge}<button class="risk-edit-btn" onclick="openRiskModal('${h.tradingsymbol}',${customLimit})">${isCustom?customLimit+'%':''} ✎</button></div>
+        <div style="display:flex;align-items:center;gap:3px;flex-wrap:wrap">${badge}<button class="risk-edit-btn" onclick="openRiskModal('${h.tradingsymbol}',${customLimit})">${isCustom?customLimit+'%':''} ✎</button><a href="${kiteUrl}" target="_blank" class="sell-btn" title="Manage in Kite">Sell</a></div>
         <div class="mini-bar"><div class="mini-fill" style="width:${h.pnl_pct>=0?100:Math.min(ratio*100,100)}%;background:${barClr}"></div></div>
       </td>
     </tr>`;
@@ -1728,7 +1877,7 @@ function renderGrowthChart(d){
 
   const datasets=[
     {label:'Portfolio Value',data:valData,borderColor:lineColor,backgroundColor:fillColor,borderWidth:2.5,fill:true,tension:0.4,pointRadius:ptR,pointBackgroundColor:lineColor,pointBorderColor:isDark?'#0f1117':'#f4f6fb',pointBorderWidth:2,pointHoverRadius:5},
-    {label:`Profit Target (+${st.cagr_target}%)`,data:targetData,borderColor:'rgba(255,82,82,0.5)',backgroundColor:'transparent',borderWidth:1.5,borderDash:[4,4],tension:0.4,pointRadius:0},
+    {label:`🎯 Target (+${st.cagr_target}%)`,data:targetData,borderColor:'rgba(255,82,82,0.85)',backgroundColor:'rgba(255,82,82,0.05)',borderWidth:2.5,borderDash:[6,3],tension:0.4,pointRadius:0,fill:false},
   ];
   if(drawdownData.length)datasets.push({label:'Drawdown %',data:drawdownData,borderColor:'rgba(255,171,64,0.6)',backgroundColor:'transparent',borderWidth:1,borderDash:[2,3],tension:0.4,pointRadius:0,yAxisID:'y2'});
 
@@ -1785,11 +1934,11 @@ function renderHoldingsAnalytics(d){
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-bottom:8px">
           <div style="background:var(--gain-bg);border-radius:5px;padding:8px;text-align:center">
-            <div style="font-size:0.78rem;font-weight:700;color:var(--gain)">+${fmtL(grossProfit)}</div>
+            <div style="font-size:0.78rem;font-weight:700;color:var(--gain)" class="blur-val">+${fmtL(grossProfit)}</div>
             <div style="font-size:0.57rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;margin-top:2px">Gross Profit</div>
           </div>
           <div style="background:var(--loss-bg);border-radius:5px;padding:8px;text-align:center">
-            <div style="font-size:0.78rem;font-weight:700;color:var(--loss)">-${fmtL(grossLoss)}</div>
+            <div style="font-size:0.78rem;font-weight:700;color:var(--loss)" class="blur-val">-${fmtL(grossLoss)}</div>
             <div style="font-size:0.57rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;margin-top:2px">Gross Loss</div>
           </div>
         </div>
@@ -1971,10 +2120,10 @@ function renderCalendar(){
   const worstMonth = [...monthlyPLs].sort((a,b)=>a.pl-b.pl)[0];
 
   document.getElementById('calInsights').innerHTML=`
-    <div class="cal-ins-box"><div class="cal-ins-lbl">Best Day</div><div class="cal-ins-val g">${bestDay?'+'+fmtL(bestDay.pl):'—'}</div><div class="cal-ins-sub">${bestDay?.date||'No data yet'}</div></div>
-    <div class="cal-ins-box"><div class="cal-ins-lbl">Worst Day</div><div class="cal-ins-val l">${worstDay?fmtL(worstDay.pl):'—'}</div><div class="cal-ins-sub">${worstDay?.date||'No data yet'}</div></div>
-    <div class="cal-ins-box"><div class="cal-ins-lbl">Best Month</div><div class="cal-ins-val g">${bestMonth?'+'+fmtL(bestMonth.pl):'—'}</div><div class="cal-ins-sub">${bestMonth?.month||'No data yet'}</div></div>
-    <div class="cal-ins-box"><div class="cal-ins-lbl">Worst Month</div><div class="cal-ins-val l">${worstMonth?fmtL(worstMonth.pl):'—'}</div><div class="cal-ins-sub">${worstMonth?.month||'No data yet'}</div></div>`;
+    <div class="cal-ins-box"><div class="cal-ins-lbl">Best Day</div><div class="cal-ins-val g blur-val">${bestDay?'+'+fmtL(bestDay.pl):'—'}</div><div class="cal-ins-sub">${bestDay?.date||'No data yet'}</div></div>
+    <div class="cal-ins-box"><div class="cal-ins-lbl">Worst Day</div><div class="cal-ins-val l blur-val">${worstDay?fmtL(worstDay.pl):'—'}</div><div class="cal-ins-sub">${worstDay?.date||'No data yet'}</div></div>
+    <div class="cal-ins-box"><div class="cal-ins-lbl">Best Month</div><div class="cal-ins-val g blur-val">${bestMonth?'+'+fmtL(bestMonth.pl):'—'}</div><div class="cal-ins-sub">${bestMonth?.month||'No data yet'}</div></div>
+    <div class="cal-ins-box"><div class="cal-ins-lbl">Worst Month</div><div class="cal-ins-val l blur-val">${worstMonth?fmtL(worstMonth.pl):'—'}</div><div class="cal-ins-sub">${worstMonth?.month||'No data yet'}</div></div>`;
 }
 
 function showCalDay(date, pl){
@@ -2098,7 +2247,7 @@ function renderSectors(d){
               <span style="font-size:0.62rem;color:var(--muted)">${v.stocks.length} stock${v.stocks.length>1?'s':''}</span>
             </div>
             <div style="display:flex;align-items:center;gap:8px">
-              <span style="font-family:'DM Mono',monospace;font-size:0.72rem;font-weight:600;color:${v.pl>=0?'var(--gain)':'var(--loss)'}">${v.pl>=0?'+':''}${fmtL(v.pl)}</span>
+              <span style="font-family:'DM Mono',monospace;font-size:0.72rem;font-weight:600;color:${v.pl>=0?'var(--gain)':'var(--loss)'}" class="blur-val">${v.pl>=0?'+':''}${fmtL(v.pl)}</span>
               <span style="font-size:0.65rem;color:var(--muted)">${(v.value/totalVal*100).toFixed(1)}%</span>
               <span id="${uid}a" style="font-size:0.7rem;color:var(--muted)">▸</span>
             </div>
@@ -2357,42 +2506,202 @@ function jumpToToday(){
 }
 
 // ── NEWS ───────────────────────────────────────────────
-async function loadNews(d){
-  const tickers=(d?.holdings||[]).map(h=>h.tradingsymbol).join(',');
-  document.getElementById('newsNote').textContent=`for ${(d?.holdings||[]).length} holdings`;
+let allNewsItems = [];
+
+function switchNewsTab(tab, el){
+  ['news','twitter','events'].forEach(t=>{
+    document.getElementById('nspage-'+t).style.display=t===tab?'block':'none';
+    document.getElementById('nstab-'+t).classList.toggle('active',t===tab);
+  });
+  if(tab==='events') loadUpcomingEvents();
+  if(tab==='twitter'){
+    // Reload twitter widget in case theme changed
+    if(window.twttr && window.twttr.widgets) window.twttr.widgets.load();
+  }
+}
+
+function setNewsTagFilter(tag, el){
+  newsTagFilter=tag;
+  document.querySelectorAll('.nfbtn').forEach(b=>b.classList.remove('active'));
+  el.classList.add('active');
+  renderNewsItems();
+}
+
+function setNewsTickerFilter(ticker, el){
+  newsTickerFilter = newsTickerFilter===ticker ? 'all' : ticker;
+  document.querySelectorAll('.nf-ticker-btn').forEach(b=>b.classList.remove('active'));
+  if(newsTickerFilter!=='all') el.classList.add('active');
+  renderNewsItems();
+}
+
+function tagNews(title){
+  const t=title.toLowerCase();
+  const tags=[];
+  if(/target.*(raise|increas|upgrad|hike|up|revise up)/i.test(title)||/price target.*increas/i.test(title)) tags.push({cls:'tag-up',label:'Target ↑',key:'target_up'});
+  else if(/target.*(cut|lower|downgrad|reduc|slash|down)/i.test(title)||/price target.*cut/i.test(title)) tags.push({cls:'tag-dn',label:'Target ↓',key:'target_dn'});
+  if(/q[1-4]\s*(result|earning|profit|revenue|quarter)/i.test(t)||/quarterly result/i.test(t)||/quarter earn/i.test(t)) tags.push({cls:'tag-quarterly',label:'Quarterly',key:'quarterly'});
+  if(/dividend/i.test(t)) tags.push({cls:'tag-dividend',label:'Dividend',key:'dividend'});
+  if(/stock.?split|split.?stock/i.test(t)) tags.push({cls:'tag-split',label:'Split',key:'split'});
+  if(/bonus.?share|bonus.?issue/i.test(t)) tags.push({cls:'tag-bonus',label:'Bonus',key:'bonus'});
+  if(/board meeting|agm|egm|announce|approve|appoint|acqui|merger|buyback|open offer/i.test(t)) tags.push({cls:'tag-announce',label:'Announce',key:'announcement'});
+  if(!tags.length) tags.push({cls:'tag-neutral',label:'Neutral',key:'neutral'});
+  return tags;
+}
+
+function renderNewsItems(){
   const container=document.getElementById('newsContainer');
-  container.innerHTML=`<div style="text-align:center;padding:20px;color:var(--muted);font-size:0.75rem">Fetching news from Google News RSS...</div>`;
+  if(!allNewsItems.length){container.innerHTML=`<div style="text-align:center;padding:30px;color:var(--muted)">No news loaded.</div>`;return;}
+  let filtered=allNewsItems;
+  if(newsTickerFilter!=='all') filtered=filtered.filter(n=>n.ticker===newsTickerFilter);
+  if(newsTagFilter!=='all') filtered=filtered.filter(n=>n.tags.some(t=>t.key===newsTagFilter));
+  if(!filtered.length){container.innerHTML=`<div style="text-align:center;padding:30px;color:var(--muted);font-size:0.78rem">No news matching this filter.</div>`;return;}
+  container.innerHTML=filtered.slice(0,30).map(n=>`
+    <div class="news-item">
+      <div style="display:flex;flex-direction:column;gap:3px;flex-shrink:0">
+        <div class="news-ticker">${n.ticker}</div>
+        <div>${n.tags.map(t=>`<span class="news-tag ${t.cls}">${t.label}</span>`).join('')}</div>
+      </div>
+      <div class="news-content">
+        <div class="news-title"><a href="${n.link}" target="_blank">${n.title}</a></div>
+        <div class="news-meta">${n.pubDate||''} · ${n.source||'Google News'}</div>
+      </div>
+    </div>`).join('');
+}
+
+async function loadNews(d){
+  const holdings=d?.holdings||[];
+  document.getElementById('newsNote').textContent=`for ${holdings.length} holdings`;
+  // Build ticker filter buttons
+  const tickerWrap=document.getElementById('newsTickerFilter');
+  if(tickerWrap) tickerWrap.innerHTML=`<span style="font-size:0.6rem;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:0.5px;align-self:center">Stock:</span>`
+    +holdings.map(h=>`<button class="nf-ticker-btn" onclick="setNewsTickerFilter('${h.tradingsymbol}',this)">${h.tradingsymbol}</button>`).join('');
+
+  const container=document.getElementById('newsContainer');
+  container.innerHTML=`<div style="text-align:center;padding:20px;color:var(--muted);font-size:0.75rem">Fetching news...</div>`;
+  allNewsItems=[];
 
   try{
-    const holdings=d?.holdings||[];
-    let allNews=[];
-    for(const h of holdings.slice(0,5)){
+    for(const h of holdings.slice(0,8)){
       const query=encodeURIComponent(h.tradingsymbol+' NSE stock');
       const rssUrl=`https://news.google.com/rss/search?q=${query}&hl=en-IN&gl=IN&ceid=IN:en`;
       try{
         const r=await fetch(`/api/news-proxy?url=${encodeURIComponent(rssUrl)}`);
-        if(r.ok){const items=await r.json();allNews=allNews.concat(items.map(i=>({...i,ticker:h.tradingsymbol})));}
+        if(r.ok){
+          const items=await r.json();
+          items.forEach(i=>{
+            const tags=tagNews(i.title||'');
+            allNewsItems.push({...i,ticker:h.tradingsymbol,tags});
+          });
+        }
       }catch(e){}
     }
-    if(allNews.length){
-      container.innerHTML=allNews.slice(0,20).map(n=>`
-        <div class="news-item">
-          <div class="news-ticker">${n.ticker}</div>
-          <div class="news-content">
-            <div class="news-title"><a href="${n.link}" target="_blank">${n.title}</a></div>
-            <div class="news-meta">${n.pubDate||''} · ${n.source||'Google News'}</div>
-          </div>
-        </div>`).join('');
+    if(allNewsItems.length){
+      // Sort by date desc
+      allNewsItems.sort((a,b)=>new Date(b.pubDate||0)-new Date(a.pubDate||0));
+      renderNewsItems();
     }else{
       container.innerHTML=`<div style="text-align:center;padding:30px;color:var(--muted);font-size:0.78rem">
         News requires the /api/news-proxy endpoint.<br>
-        <span style="font-size:0.68rem">Your holdings: ${holdings.map(h=>`<a href="https://economictimes.indiatimes.com/markets/stocks/news" target="_blank" style="color:var(--accent)">${h.tradingsymbol}</a>`).join(', ')}</span><br><br>
-        <a href="https://economictimes.indiatimes.com/markets/stocks/news" target="_blank" style="color:var(--accent)">→ Read Stock News on Economic Times</a>
+        <span style="font-size:0.68rem">Holdings: ${holdings.map(h=>`<a href="https://economictimes.indiatimes.com/markets/stocks/news" target="_blank" style="color:var(--accent)">${h.tradingsymbol}</a>`).join(', ')}</span><br><br>
+        <a href="https://economictimes.indiatimes.com/markets/stocks/news" target="_blank" style="color:var(--accent)">→ Economic Times</a>
         &nbsp;·&nbsp;
         <a href="https://www.moneycontrol.com/news/business/stocks/" target="_blank" style="color:var(--accent)">→ MoneyControl</a>
       </div>`;
     }
   }catch(e){container.innerHTML=`<div style="text-align:center;padding:20px;color:var(--muted)">Could not load news.</div>`;}
+}
+
+// ── UPCOMING EVENTS (Earnings / Dividends / Splits) ────
+async function loadUpcomingEvents(){
+  const holdings=(lastData?.holdings)||[];
+  if(!holdings.length){document.getElementById('eventsContainer').innerHTML=`<div style="text-align:center;padding:20px;color:var(--muted)">No holdings found.</div>`;return;}
+  document.getElementById('eventsNote').textContent=`for ${holdings.length} stocks`;
+  const container=document.getElementById('eventsContainer');
+  container.innerHTML=`<div style="text-align:center;padding:20px;color:var(--muted);font-size:0.75rem">Loading events data...</div>`;
+
+  // Fetch events from Google News RSS — look for dividend/result/split/bonus keywords
+  const events=[];
+  const today=new Date();
+  const tickers=holdings.map(h=>h.tradingsymbol);
+
+  try{
+    for(const ticker of tickers.slice(0,10)){
+      // Search for upcoming events
+      for(const keyword of ['result date','dividend','board meeting','record date','bonus','split']){
+        const query=encodeURIComponent(`${ticker} ${keyword} 2025 2026`);
+        const rssUrl=`https://news.google.com/rss/search?q=${query}&hl=en-IN&gl=IN&ceid=IN:en`;
+        try{
+          const r=await fetch(`/api/news-proxy?url=${encodeURIComponent(rssUrl)}`);
+          if(r.ok){
+            const items=await r.json();
+            items.slice(0,2).forEach(item=>{
+              // Classify event type
+              const t=item.title.toLowerCase();
+              let evType='', evCls='', evLabel='';
+              if(/q[1-4].*(result|earning)|quarterly result|result date/i.test(item.title)){evType='earnings';evCls='ev-earnings';evLabel='📊 Earnings';}
+              else if(/dividend|interim div|final div/i.test(item.title)){evType='dividend';evCls='ev-dividend';evLabel='💰 Dividend';}
+              else if(/stock.?split|split.?stock/i.test(item.title)){evType='split';evCls='ev-split';evLabel='✂️ Split';}
+              else if(/bonus.?share/i.test(item.title)){evType='bonus';evCls='ev-bonus';evLabel='🎁 Bonus';}
+              else if(/board meeting|agm|record date/i.test(item.title)){evType='meeting';evCls='ev-earnings';evLabel='📋 Meeting';}
+              else return;
+              events.push({ticker,title:item.title,link:item.link,pubDate:item.pubDate,evType,evCls,evLabel});
+            });
+          }
+        }catch(e){}
+      }
+    }
+  }catch(e){}
+
+  if(!events.length){
+    container.innerHTML=`
+      <div style="text-align:center;padding:20px;color:var(--muted);font-size:0.78rem;margin-bottom:16px">
+        Live event data unavailable. Check these sources:
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-bottom:20px">
+        ${tickers.slice(0,15).map(t=>`
+          <a href="https://www.nseindia.com/get-quotes/equity?symbol=${t}" target="_blank"
+             style="font-size:0.68rem;color:var(--accent);background:var(--s2);padding:3px 8px;border-radius:4px;border:1px solid var(--border);text-decoration:none">${t}</a>`).join('')}
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:center">
+        <a href="https://www.nseindia.com/companies-listing/corporate-filings-event-calendar" target="_blank" style="font-size:0.72rem;color:var(--accent);text-decoration:none">→ NSE Event Calendar</a>
+        <a href="https://www.bseindia.com/corporates/ann.html" target="_blank" style="font-size:0.72rem;color:var(--accent);text-decoration:none">→ BSE Announcements</a>
+        <a href="https://trendlyne.com/earnings/upcoming/" target="_blank" style="font-size:0.72rem;color:var(--accent);text-decoration:none">→ Trendlyne Earnings</a>
+        <a href="https://www.screener.in/screens/upcoming-results/" target="_blank" style="font-size:0.72rem;color:var(--accent);text-decoration:none">→ Screener Upcoming</a>
+      </div>`;
+    return;
+  }
+
+  // Group by event type
+  const grouped={earnings:[],dividend:[],split:[],bonus:[],meeting:[]};
+  events.forEach(e=>{if(grouped[e.evType]) grouped[e.evType].push(e);});
+
+  const sections=[
+    {key:'earnings',label:'📊 Earnings / Results'},
+    {key:'dividend',label:'💰 Dividends'},
+    {key:'split',label:'✂️ Stock Splits'},
+    {key:'bonus',label:'🎁 Bonus Shares'},
+    {key:'meeting',label:'📋 Board Meetings'},
+  ];
+
+  container.innerHTML=sections.filter(s=>grouped[s.key].length>0).map(s=>`
+    <div style="margin-bottom:16px">
+      <div style="font-size:0.68rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--muted);margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid var(--border)">${s.label}</div>
+      ${grouped[s.key].map(ev=>`
+        <div class="event-row">
+          <div class="event-ticker">${ev.ticker}</div>
+          <span class="event-type ${ev.evCls}">${ev.evLabel}</span>
+          <div style="flex:1;min-width:0">
+            <a href="${ev.link}" target="_blank" style="font-size:0.72rem;color:var(--text);text-decoration:none;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${ev.title}</a>
+            <div class="event-date">${ev.pubDate||''}</div>
+          </div>
+        </div>`).join('')}
+    </div>`).join('') +
+    `<div style="margin-top:12px;padding:8px;background:var(--s2);border-radius:6px;border:1px solid var(--border);font-size:0.65rem;color:var(--muted);display:flex;flex-wrap:wrap;gap:10px">
+      <span>For official dates:</span>
+      <a href="https://www.nseindia.com/companies-listing/corporate-filings-event-calendar" target="_blank" style="color:var(--accent);text-decoration:none">NSE Calendar</a>
+      <a href="https://trendlyne.com/earnings/upcoming/" target="_blank" style="color:var(--accent);text-decoration:none">Trendlyne</a>
+      <a href="https://www.screener.in/screens/upcoming-results/" target="_blank" style="color:var(--accent);text-decoration:none">Screener</a>
+    </div>`;
 }
 
 // ── RISK MODAL ─────────────────────────────────────────
