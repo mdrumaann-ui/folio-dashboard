@@ -1012,7 +1012,7 @@ tbody tr:last-child td{border-bottom:none;}
 
 /* BLUR MODE */
 .blur-mode .blur-val{filter:blur(5px);user-select:none;transition:filter 0.2s;}
-.blur-mode .blur-val:hover{filter:blur(0);}
+.blur-mode .blur-val.peek{filter:blur(0);}
 
 /* NEWS TAGS */
 .news-tag{display:inline-block;font-size:0.58rem;font-weight:700;padding:1px 6px;border-radius:3px;margin-right:3px;letter-spacing:0.3px;}
@@ -1550,6 +1550,29 @@ function toggleBlur(){
   document.body.classList.toggle('blur-mode',blurActive);
   const btn=document.getElementById('blurBtn');
   if(btn){btn.textContent=blurActive?'👁 Show ₹':'👁 Hide ₹';btn.style.borderColor=blurActive?'var(--warn)':'';btn.style.color=blurActive?'var(--warn)':'';}
+  // Wire up click-to-peek on all blur-val elements when blur is active
+  document.querySelectorAll('.blur-val').forEach(el=>{
+    if(blurActive){
+      el.style.cursor='pointer';
+      el.title='Click to peek';
+      el._blurClick = function(e){
+        e.stopPropagation();
+        this.classList.toggle('peek');
+        // Auto-rehide after 2s
+        if(this.classList.contains('peek')){
+          clearTimeout(this._peekTimer);
+          this._peekTimer=setTimeout(()=>this.classList.remove('peek'),2000);
+        }
+      };
+      el.addEventListener('click',el._blurClick);
+    } else {
+      el.style.cursor='';
+      el.title='';
+      el.classList.remove('peek');
+      if(el._blurClick){el.removeEventListener('click',el._blurClick);delete el._blurClick;}
+    }
+  });
+}
 }
 
 // ── NAV ────────────────────────────────────────────────
@@ -1763,7 +1786,7 @@ function renderOverview(d){
         <div style="font-weight:700;font-size:0.82rem" class="blur-val">${fmtL(p.total_capital)}</div>
       </div>
       <div style="background:var(--s2);border-radius:5px;padding:8px;text-align:center">
-        <div style="font-size:0.6rem;color:var(--muted);margin-bottom:2px">MAX LOSS</div>
+        <div style="font-size:0.6rem;color:var(--muted);margin-bottom:2px">MAX LOSS LIMIT</div>
         <div style="font-weight:700;font-size:0.82rem;color:var(--loss)" class="blur-val">${fmtL(rs.max_loss_amt)}</div>
       </div>
       <div style="background:var(--s2);border-radius:5px;padding:8px;text-align:center">
@@ -1771,7 +1794,7 @@ function renderOverview(d){
         <div style="font-weight:700;font-size:0.82rem;color:${rs.actual_loss>0?'var(--loss)':'var(--gain)'}" class="blur-val">${rs.actual_loss>0?fmtL(rs.actual_loss):'None'}</div>
       </div>
       <div style="background:var(--s2);border-radius:5px;padding:8px;text-align:center;border:1px solid ${rClr}40">
-        <div style="font-size:0.6rem;color:var(--muted);margin-bottom:2px">SAFETY CUSHION</div>
+        <div style="font-size:0.6rem;color:var(--muted);margin-bottom:2px">LOSS LIMIT LEFT</div>
         <div style="font-weight:700;font-size:0.82rem;color:${rClr}" class="blur-val">${fmtL(rs.loss_remaining)}</div>
       </div>
     </div>
@@ -1788,14 +1811,15 @@ function renderOverview(d){
     const lp=Math.abs(h.pnl_pct);
     const ratio=lp/customLimit;
     const barClr=h.pnl_pct>=0?'var(--gain)':ratio>=1?'var(--loss)':ratio>=0.8?'var(--orange)':ratio>=0.5?'var(--warn)':'var(--gain)';
-    const badge=h.pnl_pct>=0?`<span class="sri-badge badge-ok">OK</span>`:ratio>=1?`<span class="sri-badge badge-bad">🔴 SELL</span>`:ratio>=0.8?`<span class="sri-badge badge-orange">🟠 SELL SOON</span>`:ratio>=0.5?`<span class="sri-badge badge-warn">🟡 WATCH</span>`:`<span class="sri-badge badge-ok">🟢 OK</span>`;
+    const badge=h.pnl_pct>=0?`<span class="sri-badge badge-ok">OK</span>`:ratio>=1?`<span class="sri-badge badge-bad">🔴 BREACH</span>`:ratio>=0.8?`<span class="sri-badge badge-orange">🟠 SOON</span>`:ratio>=0.5?`<span class="sri-badge badge-warn">🟡 WATCH</span>`:`<span class="sri-badge badge-ok">🟢 OK</span>`;
     const exchange=h.exchange||'NSE';
     const tvUrl=`https://www.tradingview.com/chart/?symbol=${exchange}%3A${h.tradingsymbol}`;
     const kiteUrl=`https://kite.zerodha.com/positions`;
     const isCustom=stockRiskLimits[h.tradingsymbol]!==undefined;
-    // % Risk = how much of position is at risk (stop-loss distance as % of invested)
-    const riskPct = h.pnl_pct < 0 ? Math.abs(h.pnl_pct).toFixed(1) : '0.0';
-    const riskColor = ratio>=1?'var(--loss)':ratio>=0.8?'var(--orange)':ratio>=0.5?'var(--warn)':'var(--gain)';
+    // % Risk = the limit set (custom or global), coloured by how close to breach
+    const riskColor = ratio>=1?'var(--loss)':ratio>=0.8?'var(--orange)':ratio>=0.5?'var(--warn)':'var(--muted)';
+    // Sell button: only show when loss has breached the limit
+    const sellBtn = ratio>=1 ? `<a href="${kiteUrl}" target="_blank" class="sell-btn" title="Loss limit breached — sell in Kite">Sell</a>` : '';
     return `<tr>
       <td><a href="${tvUrl}" target="_blank" style="text-decoration:none;display:flex;align-items:center;gap:3px"><span class="tk tv-link">${h.tradingsymbol}</span><span style="font-size:0.55rem;color:var(--muted)">↗</span></a></td>
       <td>${h.quantity}</td>
@@ -1806,9 +1830,9 @@ function renderOverview(d){
       <td class="${gc(h.pnl)} blur-val">${h.pnl>=0?'+':'-'}₹${Math.abs(Math.round(h.pnl)).toLocaleString('en-IN')}</td>
       <td class="${gc(h.pnl_pct)}">${pct(h.pnl_pct)}</td>
       <td class="m">${h.weight_pct}%</td>
-      <td style="color:${riskColor};font-family:'DM Mono',monospace;font-weight:600">${riskPct}%</td>
+      <td style="color:${riskColor};font-size:0.72rem">${customLimit}%</td>
       <td>
-        <div style="display:flex;align-items:center;gap:3px;flex-wrap:wrap">${badge}<button class="risk-edit-btn" onclick="openRiskModal('${h.tradingsymbol}',${customLimit})">${isCustom?customLimit+'%':''} ✎</button><a href="${kiteUrl}" target="_blank" class="sell-btn" title="Manage in Kite">Sell</a></div>
+        <div style="display:flex;align-items:center;gap:3px;flex-wrap:wrap">${badge}<button class="risk-edit-btn" onclick="openRiskModal('${h.tradingsymbol}',${customLimit})">${isCustom?customLimit+'%':''} ✎</button>${sellBtn}</div>
         <div class="mini-bar"><div class="mini-fill" style="width:${h.pnl_pct>=0?100:Math.min(ratio*100,100)}%;background:${barClr}"></div></div>
       </td>
     </tr>`;
@@ -1968,12 +1992,12 @@ function renderHoldingsAnalytics(d){
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
         <div style="text-align:center;padding:12px;background:var(--gain-bg);border-radius:7px;border:1px solid rgba(0,230,118,0.2)">
           <div style="font-size:0.58rem;color:var(--muted);letter-spacing:1px;text-transform:uppercase;margin-bottom:5px">Avg Win</div>
-          <div style="font-size:1.1rem;font-weight:700;color:var(--gain)">+${fmtL(avgWinAmt)}</div>
+          <div style="font-size:1.1rem;font-weight:700;color:var(--gain)" class="blur-val">+${fmtL(avgWinAmt)}</div>
           <div style="font-size:0.68rem;color:var(--gain);margin-top:2px">${pct(avgWinPct)}</div>
         </div>
         <div style="text-align:center;padding:12px;background:var(--loss-bg);border-radius:7px;border:1px solid rgba(255,82,82,0.2)">
           <div style="font-size:0.58rem;color:var(--muted);letter-spacing:1px;text-transform:uppercase;margin-bottom:5px">Avg Loss</div>
-          <div style="font-size:1.1rem;font-weight:700;color:var(--loss)">-${fmtL(avgLossAmt)}</div>
+          <div style="font-size:1.1rem;font-weight:700;color:var(--loss)" class="blur-val">-${fmtL(avgLossAmt)}</div>
           <div style="font-size:0.68rem;color:var(--loss);margin-top:2px">-${avgLossPct.toFixed(1)}%</div>
         </div>
         <div style="text-align:center;padding:12px;background:var(--s3);border-radius:7px;border:1px solid var(--border)">
@@ -1991,7 +2015,7 @@ function renderHoldingsAnalytics(d){
     <div class="ha-grid">
       <div class="ha-box"><div class="ha-num">${total}</div><div class="ha-lbl">Stocks</div></div>
       <div class="ha-box"><div class="ha-num" style="color:${avgReturn>=0?'var(--gain)':'var(--loss)'}">${pct(avgReturn)}</div><div class="ha-lbl">Avg Return</div></div>
-      <div class="ha-box"><div class="ha-num">${fmtL(totalInvested)}</div><div class="ha-lbl">Invested</div></div>
+      <div class="ha-box"><div class="ha-num blur-val">${fmtL(totalInvested)}</div><div class="ha-lbl">Invested</div></div>
       <div class="ha-box" style="border-color:rgba(0,230,118,0.3)">
         <div class="ha-num" style="color:var(--gain)">${best?.tradingsymbol||'-'}</div>
         <div class="ha-lbl">Best Stock</div>
@@ -2008,7 +2032,7 @@ function renderHoldingsAnalytics(d){
     <div style="background:var(--s2);border-radius:7px;padding:11px 14px;display:flex;justify-content:space-between;align-items:center;border:1px solid var(--border)">
       <div>
         <div style="font-size:0.58rem;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:2px">Biggest Position</div>
-        <div style="font-weight:700">${biggestPos?.tradingsymbol||'-'} · ${fmtL(biggestPos?.invested_value||0)} · ${biggestPos?.weight_pct||0}% of portfolio</div>
+        <div style="font-weight:700">${biggestPos?.tradingsymbol||'-'} · <span class="blur-val">${fmtL(biggestPos?.invested_value||0)}</span> · ${biggestPos?.weight_pct||0}% of portfolio</div>
       </div>
       <div style="text-align:right">
         <div style="font-size:0.58rem;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:2px">Return</div>
@@ -2212,7 +2236,7 @@ function renderSectors(d){
          onclick="showSectorDetail('${name}',null,'${COLORS[i%COLORS.length]}',${totalVal})">
       <div style="width:8px;height:8px;border-radius:2px;background:${COLORS[i%COLORS.length]};flex-shrink:0"></div>
       <span style="font-size:0.68rem;flex:1;font-weight:500">${name}</span>
-      <span style="font-size:0.65rem;font-family:'DM Mono',monospace;color:${v.pl>=0?'var(--gain)':'var(--loss)'}">
+      <span style="font-size:0.65rem;font-family:'DM Mono',monospace;color:${v.pl>=0?'var(--gain)':'var(--loss)'}" class="blur-val">
         ${v.pl>=0?'+':''}${fmtL(v.pl)}
       </span>
       <span style="font-size:0.6rem;color:var(--muted);width:28px;text-align:right">${(v.value/totalVal*100).toFixed(0)}%</span>
@@ -2230,8 +2254,8 @@ function renderSectors(d){
         <a href="https://www.tradingview.com/chart/?symbol=${h.exchange||'NSE'}%3A${h.tradingsymbol}"
            target="_blank" style="font-size:0.74rem;font-weight:600;color:var(--text);text-decoration:none">${h.tradingsymbol} ↗</a>
         <div style="display:flex;align-items:center;gap:10px">
-          <span style="font-size:0.68rem;color:var(--muted)">${fmtL(h.current_value)}</span>
-          <span style="font-size:0.74rem;font-weight:600;color:${h.pnl>=0?'var(--gain)':'var(--loss)'};min-width:60px;text-align:right">${h.pnl>=0?'+':''}${fmtL(h.pnl)}</span>
+          <span style="font-size:0.68rem;color:var(--muted)" class="blur-val">${fmtL(h.current_value)}</span>
+          <span style="font-size:0.74rem;font-weight:600;color:${h.pnl>=0?'var(--gain)':'var(--loss)'};min-width:60px;text-align:right" class="blur-val">${h.pnl>=0?'+':''}${fmtL(h.pnl)}</span>
           <span style="font-size:0.7rem;color:${h.pnl_pct>=0?'var(--gain)':'var(--loss)'};min-width:44px;text-align:right">${pct(h.pnl_pct)}</span>
         </div>
       </div>`).join('');
@@ -2280,12 +2304,12 @@ function renderSectors(d){
     <div class="cal-ins-box" style="border-color:rgba(0,230,118,0.3)">
       <div class="cal-ins-lbl">Top Profit Sector</div>
       <div class="cal-ins-val g">${bestSec?bestSec[0]:'—'}</div>
-      <div class="cal-ins-sub g">${bestSec?'+'+fmtL(bestSec[1].pl)+' · '+bestSec[1].stocks.length+' stocks':''}</div>
+      <div class="cal-ins-sub g blur-val">${bestSec?'+'+fmtL(bestSec[1].pl)+' · '+bestSec[1].stocks.length+' stocks':''}</div>
     </div>
     <div class="cal-ins-box" style="border-color:rgba(255,82,82,0.3)">
       <div class="cal-ins-lbl">Top Loss Sector</div>
       <div class="cal-ins-val l">${worstSec?worstSec[0]:'—'}</div>
-      <div class="cal-ins-sub l">${worstSec?fmtL(worstSec[1].pl)+' · '+worstSec[1].stocks.length+' stocks':''}</div>
+      <div class="cal-ins-sub l blur-val">${worstSec?fmtL(worstSec[1].pl)+' · '+worstSec[1].stocks.length+' stocks':''}</div>
     </div>`;
 
   window._sectorData  = Object.fromEntries(sectors);
@@ -2305,10 +2329,10 @@ function showSectorDetail(name, data, color, totalVal){
       <a href="https://www.tradingview.com/chart/?symbol=${h.exchange||'NSE'}%3A${h.tradingsymbol}"
          target="_blank" style="font-weight:700;font-size:0.8rem;color:var(--text);text-decoration:none">
         ${h.tradingsymbol} ↗
-        <span style="font-size:0.65rem;font-weight:400;color:var(--muted);margin-left:6px">${fmtL(h.current_value)}</span>
+        <span style="font-size:0.65rem;font-weight:400;color:var(--muted);margin-left:6px" class="blur-val">${fmtL(h.current_value)}</span>
       </a>
       <div>
-        <span style="font-size:0.8rem;font-weight:700;color:${h.pnl>=0?'var(--gain)':'var(--loss)'}">${h.pnl>=0?'+':''}${fmtL(h.pnl)}</span>
+        <span style="font-size:0.8rem;font-weight:700;color:${h.pnl>=0?'var(--gain)':'var(--loss)'}" class="blur-val">${h.pnl>=0?'+':''}${fmtL(h.pnl)}</span>
         <span style="font-size:0.72rem;margin-left:8px;color:${h.pnl_pct>=0?'var(--gain)':'var(--loss)'}">${pct(h.pnl_pct)}</span>
       </div>
     </div>`;
@@ -2325,11 +2349,11 @@ function showSectorDetail(name, data, color, totalVal){
               style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:1rem;padding:0">✕</button>
     </div>
     <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:16px">
-      ${[['Weight',pct_+'%',''],['Value',fmtL(s.value),''],['Invested',fmtL(s.invested),''],
-         ['P&L',(s.pl>=0?'+':'')+fmtL(s.pl),s.pl>=0?'color:var(--gain)':'color:var(--loss)']].map(([l,v,st])=>
+      ${[['Weight',pct_+'%','',false],['Value',fmtL(s.value),'',true],['Invested',fmtL(s.invested),'',true],
+         ['P&L',(s.pl>=0?'+':'')+fmtL(s.pl),s.pl>=0?'color:var(--gain)':'color:var(--loss)',true]].map(([l,v,st,blr])=>
         `<div style="background:var(--s3);border-radius:6px;padding:9px;text-align:center">
            <div style="font-size:0.55rem;color:var(--muted);text-transform:uppercase;margin-bottom:3px">${l}</div>
-           <div style="font-weight:700;${st}">${v}</div>
+           <div style="font-weight:700;${st}" class="${blr?'blur-val':''}">${v}</div>
          </div>`).join('')}
     </div>
     ${gainers.length?`<div style="font-size:0.65rem;font-weight:700;color:var(--gain);text-transform:uppercase;letter-spacing:1px;margin-bottom:7px">▲ Making money (${gainers.length})</div>${gainers.map(row).join('')}`:''}
