@@ -1372,7 +1372,7 @@ tbody tr:last-child td{border-bottom:none;}
              data-height="600"
              data-chrome="noheader nofooter transparent"
              href="https://twitter.com/Prakashplutus?ref_src=twsrc%5Etfw">Tweets by Prakashplutus</a>
-          <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"><\/script>
+          <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
         </div>
       </div>
       <div style="margin-top:12px;padding:10px;background:var(--s2);border-radius:6px;border:1px solid var(--border)">
