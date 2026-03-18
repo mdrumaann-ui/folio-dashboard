@@ -1573,7 +1573,6 @@ function toggleBlur(){
     }
   });
 }
-}
 
 // ── NAV ────────────────────────────────────────────────
 function showPage(name){
