@@ -218,13 +218,20 @@ def enrich_holdings(raw):
         cost  = qty * avg
         pl    = val - cost
         pl_pct = (pl / cost * 100) if cost > 0 else 0
+        # Kite provides close_price (prev close) and day_change (per-share change today)
+        close   = h.get("close_price", ltp)
+        day_chg = h.get("day_change", ltp - close)
+        day_pl  = day_chg * qty
+        day_pct = h.get("day_change_percentage", (day_chg / close * 100) if close > 0 else 0)
         enriched.append({
             **h,
             "current_value":  round(val, 2),
             "invested_value": round(cost, 2),
             "pnl":            round(pl, 2),
             "pnl_pct":        round(pl_pct, 2),
-            "weight_pct":     0,  # filled after total is known
+            "day_pl":         round(day_pl, 2),
+            "day_pct":        round(day_pct, 2),
+            "weight_pct":     0,
         })
     total_val = sum(h["current_value"] for h in enriched)
     for h in enriched:
@@ -332,6 +339,9 @@ def api_summary():
         total_pl   = total_val - total_cost
         total_pl_pct = (total_pl / total_cost * 100) if total_cost > 0 else 0
         cagr       = calc_cagr(total_cost, total_val, settings["invested_since"])
+        # Today's P&L — from Kite's own close_price/day_change fields per holding
+        day_pl     = sum(h.get("day_pl", 0) for h in holdings)
+        day_pct    = (day_pl / (total_val - day_pl) * 100) if (total_val - day_pl) > 0 else 0
 
         # Load per-stock custom risk limits
         stock_risks = load_stock_risks()
@@ -385,6 +395,8 @@ def api_summary():
                 "total_cost":     round(total_cost, 2),
                 "total_pl":       round(total_pl, 2),
                 "total_pl_pct":   round(total_pl_pct, 2),
+                "day_pl":         round(day_pl, 2),
+                "day_pct":        round(day_pct, 2),
                 "cagr":           cagr,
                 "cagr_met":       cagr >= settings["cagr_target"],
                 "holdings_count": len(holdings),
@@ -509,11 +521,12 @@ def api_nifty_pe():
     except Exception as e:
         print(f"NSE PE fetch failed: {e}")
 
-    # Try Yahoo Finance
+    # Try Yahoo Finance v1 with better headers
     try:
         req = urllib.request.Request(
-            "https://query2.finance.yahoo.com/v10/finance/quoteSummary/%5ENSEI?modules=summaryDetail",
-            headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
+            "https://query1.finance.yahoo.com/v10/finance/quoteSummary/%5ENSEI?modules=summaryDetail",
+            headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                     "Accept": "application/json", "Accept-Language": "en-US,en;q=0.9"}
         )
         with urllib.request.urlopen(req, timeout=6) as r:
             data = json.loads(r.read().decode())
@@ -523,7 +536,25 @@ def api_nifty_pe():
     except Exception as e:
         print(f"Yahoo PE fetch failed: {e}")
 
-    return jsonify({"pe": None, "error": "Could not fetch PE ratio"}), 200
+    # Try Screener.in public chart API
+    try:
+        req = urllib.request.Request(
+            "https://www.screener.in/api/company/NIFTY/chart/?q=Price+to+Earning&days=30",
+            headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json",
+                     "X-Requested-With": "XMLHttpRequest"}
+        )
+        with urllib.request.urlopen(req, timeout=6) as r:
+            sdata = json.loads(r.read().decode())
+        datasets = sdata.get("datasets", [])
+        if datasets and datasets[0].get("values"):
+            latest = datasets[0]["values"][-1]
+            pe = float(latest[1]) if latest and len(latest) > 1 else None
+            if pe:
+                return jsonify({"pe": round(pe, 2), "source": "Screener.in"})
+    except Exception as e:
+        print(f"Screener PE fetch failed: {e}")
+
+    return jsonify({"pe": None, "error": "PE unavailable — NSE/Yahoo/Screener all blocked"}), 200
 
 
 @app.route("/api/ticker")
@@ -743,6 +774,78 @@ def save_journal():
         return jsonify({"error": str(e)}), 500
 
 
+# ─────────────────────────────────────────────────────────
+# JOURNAL IMAGE ATTACHMENTS — saved to ./journal_images/YYYY-MM-DD/
+# ─────────────────────────────────────────────────────────
+
+import os as _os
+
+IMAGES_DIR = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "journal_images")
+
+def ensure_date_dir(date_str):
+    d = _os.path.join(IMAGES_DIR, date_str)
+    _os.makedirs(d, exist_ok=True)
+    return d
+
+@app.route("/api/journal-images/<date>", methods=["GET"])
+def list_journal_images(date):
+    """List all images for a given date."""
+    try:
+        d = _os.path.join(IMAGES_DIR, date)
+        if not _os.path.isdir(d):
+            return jsonify([])
+        files = sorted(_os.listdir(d))
+        return jsonify([f for f in files if f.lower().endswith(
+            ('.jpg','.jpeg','.png','.gif','.webp','.bmp','.heic'))])
+    except Exception as e:
+        return jsonify([])
+
+@app.route("/api/journal-images/<date>/<filename>", methods=["GET"])
+def serve_journal_image(date, filename):
+    """Serve a journal image file."""
+    import mimetypes
+    from flask import send_from_directory
+    try:
+        d = _os.path.join(IMAGES_DIR, date)
+        return send_from_directory(d, filename)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 404
+
+@app.route("/api/journal-images/<date>", methods=["POST"])
+def upload_journal_image(date):
+    """Upload one or more images for a journal date."""
+    try:
+        from flask import request as req
+        files = req.files.getlist("images")
+        if not files:
+            return jsonify({"error": "No files"}), 400
+        d = ensure_date_dir(date)
+        saved = []
+        for f in files:
+            if not f.filename:
+                continue
+            # Safe filename: timestamp + original name
+            import time, re
+            safe = re.sub(r'[^\w.\-]', '_', f.filename)
+            fname = f"{int(time.time()*1000)}_{safe}"
+            f.save(_os.path.join(d, fname))
+            saved.append(fname)
+        return jsonify({"ok": True, "saved": saved})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/journal-images/<date>/<filename>", methods=["DELETE"])
+def delete_journal_image(date, filename):
+    """Delete a journal image."""
+    try:
+        path = _os.path.join(IMAGES_DIR, date, filename)
+        if _os.path.isfile(path):
+            _os.remove(path)
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/news-proxy")
 def news_proxy():
     """Proxy Google News RSS to avoid CORS issues."""
@@ -780,7 +883,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>folio · Live</title>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&family=Caveat:wght@400;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 <style>
 :root{
@@ -1010,35 +1113,14 @@ tbody tr:last-child td{border-bottom:none;}
   top:14px;
   opacity:0.5;
 }
-.journal-textarea.ruled{
-  background:transparent;
-  border:none;
-  border-radius:0;
-  outline:none;
-  position:relative;
-  z-index:1;
-  line-height:1.7;
-  font-size:0.84rem;
-}
-/* HANDWRITING mode */
-.journal-textarea.handwriting{
-  font-family:'Caveat','Dancing Script',cursive;
-  font-size:1.05rem;
-  line-height:1.8;
-  letter-spacing:0.3px;
-}
-/* HANDWRITING CANVAS */
-.journal-canvas-wrap{position:relative;border-radius:8px;overflow:hidden;border:2px solid var(--accent);background:#fffef5;}
-.journal-canvas-wrap.dark-canvas{background:#1e2030;}
-#journalCanvas{display:block;width:100%;touch-action:none;cursor:crosshair;}
-.canvas-toolbar{display:flex;gap:6px;align-items:center;padding:6px 10px;background:var(--s3);border-radius:6px;border:1px solid var(--border);flex-wrap:wrap;margin-bottom:6px;}
-.ctool-color{width:18px;height:18px;border-radius:50%;border:2px solid transparent;cursor:pointer;transition:all 0.15s;flex-shrink:0;}
-.ctool-color.active,.ctool-color:hover{border-color:var(--accent);transform:scale(1.2);}
-.ctool-range{width:70px;accent-color:var(--accent);cursor:pointer;}
-.ctool-btn{background:none;border:1px solid var(--border);color:var(--muted);padding:3px 8px;border-radius:4px;cursor:pointer;font-size:0.68rem;font-family:'Inter',sans-serif;transition:all 0.15s;}
-.ctool-btn:hover{border-color:var(--accent);color:var(--accent);}
-.ctool-btn.active{background:var(--accent);color:#fff;border-color:var(--accent);}
-.journal-save-status{font-size:0.62rem;color:var(--muted);}
+/* JOURNAL IMAGE ATTACHMENTS */
+.jimg-thumb{position:relative;display:inline-flex;flex-direction:column;border-radius:7px;overflow:visible;}
+.jimg-inner{width:120px;height:100px;border-radius:7px;overflow:hidden;border:1px solid var(--border);cursor:zoom-in;position:relative;transition:transform 0.15s;}
+.jimg-inner:hover{transform:scale(1.03);border-color:var(--accent);}
+.jimg-inner img{width:100%;height:100%;object-fit:cover;display:block;}
+.jimg-overlay{position:absolute;bottom:0;left:0;right:0;background:linear-gradient(transparent,rgba(0,0,0,0.55));padding:4px 5px 4px;display:flex;align-items:flex-end;}
+.jimg-del{position:absolute;top:-6px;right:-6px;width:18px;height:18px;border-radius:50%;background:var(--loss);color:#fff;border:2px solid var(--bg);font-size:0.55rem;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1;z-index:1;transition:transform 0.15s;}
+.jimg-del:hover{transform:scale(1.2);}
 .search-results{background:var(--s2);border:1px solid var(--border);border-radius:7px;padding:8px;display:none;max-height:160px;overflow-y:auto;}
 .search-result-item{padding:6px 0;border-bottom:1px solid var(--border);cursor:pointer;}
 .search-result-item:last-child{border-bottom:none;}
@@ -1352,50 +1434,29 @@ tbody tr:last-child td{border-bottom:none;}
           <button class="jtool" onclick="jInsert('⚠️ ','',true)" title="Risk note">⚠️ Risk</button>
           <button class="jtool" onclick="jInsert('💡 ','',true)" title="Idea">💡 Idea</button>
           <div class="jtool-sep"></div>
-          <button class="jtool" id="btnHandwriting" onclick="toggleJournalHandwriting()" title="Toggle canvas handwriting mode (stylus/touch)">✍️ Handwriting</button>
-          <button class="jtool" id="btnRuled" onclick="toggleJournalRuled()" title="Toggle ruled lines">📄 Lines</button>
+          <button class="jtool" onclick="triggerImageAttach()" title="Attach image / screenshot / chart">📎 Attach Image</button>
+          <input type="file" id="journalImageInput" accept="image/*" multiple style="display:none" onchange="handleImageAttach(this)">
           <div class="jtool-sep"></div>
           <button class="jtool" onclick="jClear()" title="Clear entry" style="color:var(--loss)">✕ Clear</button>
         </div>
 
-        <!-- CANVAS TOOLBAR — shown only in handwriting mode -->
-        <div class="canvas-toolbar" id="canvasToolbar" style="display:none">
-          <span style="font-size:0.6rem;color:var(--muted);font-weight:600">Pen:</span>
-          <div class="ctool-color active" style="background:#1a1d27" data-color="#1a1d27" onclick="setCanvasColor(this)" title="Black"></div>
-          <div class="ctool-color" style="background:#6c63ff" data-color="#6c63ff" onclick="setCanvasColor(this)" title="Purple"></div>
-          <div class="ctool-color" style="background:#00897b" data-color="#00897b" onclick="setCanvasColor(this)" title="Teal"></div>
-          <div class="ctool-color" style="background:#e53935" data-color="#e53935" onclick="setCanvasColor(this)" title="Red"></div>
-          <div class="ctool-color" style="background:#1565c0" data-color="#1565c0" onclick="setCanvasColor(this)" title="Blue"></div>
-          <div class="ctool-sep" style="width:1px;height:18px;background:var(--border);margin:0 3px"></div>
-          <span style="font-size:0.6rem;color:var(--muted)">Size:</span>
-          <input type="range" class="ctool-range" id="canvasPenSize" min="1" max="12" value="2" oninput="updatePenSize(this.value)">
-          <span id="penSizeLabel" style="font-size:0.65rem;color:var(--muted);min-width:16px">2</span>
-          <div class="ctool-sep" style="width:1px;height:18px;background:var(--border);margin:0 3px"></div>
-          <button class="ctool-btn" id="btnEraser" onclick="toggleEraser()">◻ Eraser</button>
-          <button class="ctool-btn" onclick="undoCanvas()">↩ Undo</button>
-          <button class="ctool-btn" onclick="clearCanvas()" style="color:var(--loss)">✕ Clear</button>
-          <button class="ctool-btn" onclick="saveCanvasAsImage()" style="margin-left:auto">⬇ Save PNG</button>
-        </div>
-
-        <!-- TEXTAREA (always visible) -->
+        <!-- TEXTAREA -->
         <div class="journal-ruled-wrap" id="journalRuledWrap">
-          <div class="journal-ruled-lines" id="journalRuledLines" style="display:none"></div>
           <textarea class="journal-textarea" id="journalEntry"
-            placeholder="Write your typed notes here...&#10;&#10;Switch to ✍️ Handwriting below to draw with your stylus. Both are saved together."
+            placeholder="Write your thoughts, trade notes, market observations...&#10;&#10;Use the toolbar above to format. Attach screenshots or chart images with 📎 Attach Image."
             oninput="autoSaveJournal()"></textarea>
         </div>
 
-        <!-- CANVAS (handwriting mode — shown below textarea, not replacing it) -->
-        <div id="journalCanvasWrap" style="display:none;margin-top:8px">
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+        <!-- IMAGE ATTACHMENTS — shown below textarea when images are added -->
+        <div id="journalImagesWrap" style="display:none;margin-top:8px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
             <div style="flex:1;height:1px;background:var(--border)"></div>
-            <span style="font-size:0.62rem;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:0.8px">✍️ Handwriting Canvas</span>
+            <span style="font-size:0.62rem;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:0.8px">📎 Attachments</span>
             <div style="flex:1;height:1px;background:var(--border)"></div>
           </div>
-          <div class="journal-canvas-wrap" id="journalCanvasInner">
-            <canvas id="journalCanvas" height="500"></canvas>
-          </div>
+          <div id="journalImagesGrid" style="display:flex;flex-wrap:wrap;gap:10px"></div>
         </div>
+
       </div>
     </div>
   </div>
@@ -1753,14 +1814,9 @@ function renderOverview(d){
 
   // Re-wire blur peek on freshly injected blur-val spans in alert
   if(blurActive) setTimeout(()=>rewireBlurPeek(document.getElementById('alertBanner')),0);
-  // Daily P&L estimate (today's change = current value minus yesterday's snapshot)
-  const hist=d.history||[];
-  let dailyPL=0,dailyPct=0;
-  if(hist.length>=1){
-    const yest=hist[hist.length-1];
-    dailyPL=p.total_value-(yest.value||p.total_value);
-    dailyPct=yest.value>0?(dailyPL/yest.value*100):0;
-  }
+  // Today's P&L — directly from Kite's close_price vs last_price per holding (accurate intraday)
+  const dailyPL  = p.day_pl  || 0;
+  const dailyPct = p.day_pct || 0;
 
   // CARDS — blur-val on ₹ amounts; keep % visible; exclude Avg/LTP (those are in table)
   document.getElementById('cardsRow').innerHTML=[
@@ -2407,240 +2463,6 @@ function showSectorDetail(name, data, color, totalVal){
 }
 
 // ── JOURNAL ────────────────────────────────────────────
-// ── JOURNAL HANDWRITING CANVAS & RULED LINES ───────────
-let journalHandwriting=false, journalRuled=false;
-let canvasCtx=null, canvasDrawing=false, canvasColor='#1a1d27', canvasPenSize=2, canvasEraser=false;
-let canvasHistory=[], canvasHistoryMax=30;
-let lastX=0, lastY=0;
-
-function toggleJournalHandwriting(){
-  journalHandwriting=!journalHandwriting;
-  const btn=document.getElementById('btnHandwriting');
-  const canvasWrap=document.getElementById('journalCanvasWrap');
-  const toolbar=document.getElementById('canvasToolbar');
-  btn.classList.toggle('active',journalHandwriting);
-
-  if(journalHandwriting){
-    // Show canvas BELOW the textarea — don't hide text
-    canvasWrap.style.display='block';
-    toolbar.style.display='flex';
-    // Init canvas only if first time (don't wipe existing drawing)
-    if(!canvasCtx){
-      initCanvas();
-    } else {
-      // Just re-wire events in case canvas was resized or re-inserted
-      const canvas=document.getElementById('journalCanvas');
-      canvas.onpointerdown=canvasStart;
-      canvas.onpointermove=canvasDraw;
-      canvas.onpointerup=canvasEnd;
-      canvas.onpointerout=canvasEnd;
-      canvas.onpointercancel=canvasEnd;
-    }
-    // Adapt pen color for theme if still default
-    const inner=document.getElementById('journalCanvasInner');
-    if(inner) inner.classList.toggle('dark-canvas',isDark);
-    if(isDark && canvasColor==='#1a1d27') setCanvasColorDirect('#e8eaf6');
-  } else {
-    // Hide canvas section — textarea was always visible
-    canvasWrap.style.display='none';
-    toolbar.style.display='none';
-    btn.classList.remove('active');
-    // Re-apply ruled lines to textarea if enabled
-    if(journalRuled) applyRuledLines();
-  }
-}
-
-function initCanvas(){
-  const canvas=document.getElementById('journalCanvas');
-  const wrap=document.getElementById('journalCanvasWrap');
-  // Set canvas resolution to match display width
-  const w = wrap.clientWidth || document.getElementById('journalRuledWrap').clientWidth || 700;
-  const isFirstInit = !canvasCtx;
-
-  // Only resize (which clears canvas) if this is first time
-  if(isFirstInit){
-    canvas.width = w;
-    canvas.height = 500;
-  } else if(canvas.width !== w && w > 0){
-    // Width changed (e.g. window resize) — save drawing, resize, restore
-    const saved = canvasCtx.getImageData(0,0,canvas.width,canvas.height);
-    canvas.width = w;
-    canvas.height = 500;
-    canvasCtx.putImageData(saved,0,0);
-  }
-
-  canvasCtx = canvas.getContext('2d');
-  canvasCtx.lineCap  = 'round';
-  canvasCtx.lineJoin = 'round';
-  canvasCtx.strokeStyle = canvasColor;
-  canvasCtx.lineWidth   = canvasPenSize;
-
-  if(isFirstInit){
-    // Fill background only on first init
-    canvasCtx.fillStyle = isDark ? '#1e2030' : '#fffef5';
-    canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
-    if(journalRuled) drawCanvasRuledLines();
-    // Save blank state as first history entry
-    canvasHistory = [canvasCtx.getImageData(0,0,canvas.width,canvas.height)];
-  }
-
-  // Wire pointer events (works for mouse, touch, and S-Pen stylus)
-  canvas.onpointerdown   = canvasStart;
-  canvas.onpointermove   = canvasDraw;
-  canvas.onpointerup     = canvasEnd;
-  canvas.onpointerout    = canvasEnd;
-  canvas.onpointercancel = canvasEnd;
-}
-
-function drawCanvasRuledLines(){
-  const canvas=document.getElementById('journalCanvas');
-  const ctx=canvasCtx;
-  const lineColor=isDark?'rgba(108,99,255,0.2)':'rgba(0,0,180,0.12)';
-  ctx.save();
-  ctx.strokeStyle=lineColor;
-  ctx.lineWidth=0.8;
-  const lineSpacing=32;
-  const marginLeft=60;
-  // Margin line
-  ctx.beginPath();ctx.strokeStyle='rgba(255,100,100,0.25)';ctx.moveTo(marginLeft,0);ctx.lineTo(marginLeft,canvas.height);ctx.stroke();
-  // Ruled lines
-  ctx.strokeStyle=lineColor;
-  for(let y=lineSpacing;y<canvas.height;y+=lineSpacing){
-    ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(canvas.width,y);ctx.stroke();
-  }
-  ctx.restore();
-}
-
-function getCanvasPos(canvas, e){
-  const rect=canvas.getBoundingClientRect();
-  const scaleX=canvas.width/rect.width;
-  const scaleY=canvas.height/rect.height;
-  return {x:(e.clientX-rect.left)*scaleX, y:(e.clientY-rect.top)*scaleY};
-}
-
-function canvasStart(e){
-  e.preventDefault();
-  canvasDrawing=true;
-  const pos=getCanvasPos(this,e);
-  lastX=pos.x; lastY=pos.y;
-  canvasCtx.beginPath();
-  canvasCtx.moveTo(lastX,lastY);
-  // Dot for tap
-  canvasCtx.arc(lastX,lastY,canvasEraser?canvasPenSize*3:canvasPenSize/2,0,Math.PI*2);
-  canvasCtx.fillStyle=canvasEraser?(isDark?'#1e2030':'#fffef5'):canvasColor;
-  canvasCtx.fill();
-}
-
-function canvasDraw(e){
-  if(!canvasDrawing) return;
-  e.preventDefault();
-  const pos=getCanvasPos(this,e);
-  canvasCtx.beginPath();
-  canvasCtx.moveTo(lastX,lastY);
-  canvasCtx.lineTo(pos.x,pos.y);
-  if(canvasEraser){
-    canvasCtx.globalCompositeOperation='destination-out';
-    canvasCtx.lineWidth=canvasPenSize*6;
-    canvasCtx.strokeStyle='rgba(0,0,0,1)';
-  } else {
-    canvasCtx.globalCompositeOperation='source-over';
-    canvasCtx.lineWidth=canvasPenSize;
-    canvasCtx.strokeStyle=canvasColor;
-    // Pressure simulation via pointer pressure if available
-    if(e.pressure&&e.pressure>0) canvasCtx.lineWidth=canvasPenSize*(0.5+e.pressure*1.5);
-  }
-  canvasCtx.stroke();
-  lastX=pos.x; lastY=pos.y;
-}
-
-function canvasEnd(e){
-  if(!canvasDrawing) return;
-  canvasDrawing=false;
-  canvasCtx.globalCompositeOperation='source-over';
-  // Save to history
-  const canvas=document.getElementById('journalCanvas');
-  canvasHistory.push(canvasCtx.getImageData(0,0,canvas.width,canvas.height));
-  if(canvasHistory.length>canvasHistoryMax) canvasHistory.shift();
-}
-
-function undoCanvas(){
-  if(canvasHistory.length<=1) return;
-  canvasHistory.pop();
-  const canvas=document.getElementById('journalCanvas');
-  canvasCtx.putImageData(canvasHistory[canvasHistory.length-1],0,0);
-}
-
-function clearCanvas(){
-  const canvas=document.getElementById('journalCanvas');
-  canvasCtx.fillStyle=isDark?'#1e2030':'#fffef5';
-  canvasCtx.fillRect(0,0,canvas.width,canvas.height);
-  if(journalRuled) drawCanvasRuledLines();
-  canvasHistory=[canvasCtx.getImageData(0,0,canvas.width,canvas.height)];
-}
-
-function setCanvasColor(el){
-  document.querySelectorAll('.ctool-color').forEach(e=>e.classList.remove('active'));
-  el.classList.add('active');
-  setCanvasColorDirect(el.dataset.color);
-  canvasEraser=false;
-  document.getElementById('btnEraser').classList.remove('active');
-}
-
-function setCanvasColorDirect(color){
-  canvasColor=color;
-  if(canvasCtx){canvasCtx.strokeStyle=color;canvasCtx.fillStyle=color;}
-}
-
-function toggleEraser(){
-  canvasEraser=!canvasEraser;
-  document.getElementById('btnEraser').classList.toggle('active',canvasEraser);
-}
-
-function updatePenSize(val){
-  canvasPenSize=parseInt(val);
-  document.getElementById('penSizeLabel').textContent=val;
-  if(canvasCtx) canvasCtx.lineWidth=canvasPenSize;
-}
-
-function saveCanvasAsImage(){
-  const canvas=document.getElementById('journalCanvas');
-  const link=document.createElement('a');
-  const date=journalCurrentDate||new Date().toISOString().split('T')[0];
-  link.download=`journal-${date}.png`;
-  link.href=canvas.toDataURL('image/png');
-  link.click();
-}
-
-function toggleJournalRuled(){
-  journalRuled=!journalRuled;
-  const btn=document.getElementById('btnRuled');
-  if(btn) btn.classList.toggle('active',journalRuled);
-  if(journalHandwriting && canvasCtx){
-    // Draw lines OVER existing drawing (don't wipe canvas)
-    if(journalRuled) drawCanvasRuledLines();
-    // Save this state to history
-    const canvas=document.getElementById('journalCanvas');
-    canvasHistory.push(canvasCtx.getImageData(0,0,canvas.width,canvas.height));
-    if(canvasHistory.length>30) canvasHistory.shift();
-  } else {
-    applyRuledLines();
-  }
-}
-
-function applyRuledLines(){
-  const ta=document.getElementById('journalEntry');
-  if(!ta) return;
-  if(journalRuled){
-    const lineH=28;
-    ta.style.backgroundImage=`repeating-linear-gradient(to bottom,transparent 0px,transparent ${lineH-1}px,var(--border) ${lineH-1}px,var(--border) ${lineH}px)`;
-    ta.style.backgroundSize=`100% ${lineH}px`;
-    ta.style.backgroundPositionY='14px';
-  } else {
-    ta.style.backgroundImage='';
-    ta.style.backgroundSize='';
-    ta.style.backgroundPositionY='';
-  }
-}
 
 function initJournal(){
   const today=new Date();
@@ -2656,13 +2478,72 @@ function loadJournalEntry(date){
   const entry=journalData[date]||'';
   document.getElementById('journalEntry').value=entry;
   document.getElementById('journalSaveStatus').textContent=entry?'Saved':'No entry for this date';
-  // Reset canvas for new date — each date gets its own fresh canvas
-  // (canvas drawings are not yet persisted across sessions, only text is)
-  if(canvasCtx){
-    canvasCtx=null;
-    canvasHistory=[];
-    if(journalHandwriting) initCanvas();
-  }
+  // Load images for this date
+  loadJournalImages(date);
+}
+
+// ── JOURNAL IMAGE ATTACHMENTS ──────────────────────────
+function triggerImageAttach(){
+  document.getElementById('journalImageInput').click();
+}
+
+async function handleImageAttach(input){
+  const files = Array.from(input.files);
+  if(!files.length) return;
+  const date = journalCurrentDate || new Date().toISOString().split('T')[0];
+  const formData = new FormData();
+  files.forEach(f => formData.append('images', f));
+  try{
+    const r = await fetch(`/api/journal-images/${date}`, {method:'POST', body:formData});
+    const d = await r.json();
+    if(d.ok) loadJournalImages(date);
+    else alert('Upload failed: '+(d.error||'unknown error'));
+  }catch(e){ alert('Upload error: '+e.message); }
+  input.value = ''; // reset so same file can be re-attached
+}
+
+async function loadJournalImages(date){
+  try{
+    const r = await fetch(`/api/journal-images/${date}`);
+    const files = await r.json();
+    const wrap = document.getElementById('journalImagesWrap');
+    const grid = document.getElementById('journalImagesGrid');
+    if(!files.length){
+      wrap.style.display='none';
+      grid.innerHTML='';
+      return;
+    }
+    wrap.style.display='block';
+    grid.innerHTML = files.map(fname=>`
+      <div class="jimg-thumb" id="jimg_${fname.replace(/[^a-z0-9]/gi,'_')}">
+        <div class="jimg-inner" onclick="openImageFullscreen('/api/journal-images/${date}/${fname}')">
+          <img src="/api/journal-images/${date}/${fname}" alt="${fname}" loading="lazy">
+          <div class="jimg-overlay">
+            <span style="font-size:0.65rem;color:#fff;text-shadow:0 1px 3px rgba(0,0,0,0.8);max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${fname.replace(/^\d+_/,'')}</span>
+          </div>
+        </div>
+        <button class="jimg-del" onclick="deleteJournalImage('${date}','${fname}')" title="Remove">✕</button>
+      </div>`).join('');
+  }catch(e){ console.log('Image load error:', e); }
+}
+
+async function deleteJournalImage(date, fname){
+  if(!confirm('Remove this image?')) return;
+  try{
+    await fetch(`/api/journal-images/${date}/${fname}`, {method:'DELETE'});
+    loadJournalImages(date);
+  }catch(e){ alert('Delete error: '+e.message); }
+}
+
+function openImageFullscreen(url){
+  const overlay = document.createElement('div');
+  overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.92);z-index:999;display:flex;align-items:center;justify-content:center;cursor:zoom-out;';
+  overlay.onclick = ()=> document.body.removeChild(overlay);
+  const img = document.createElement('img');
+  img.src = url;
+  img.style.cssText='max-width:95vw;max-height:95vh;border-radius:6px;box-shadow:0 8px 40px rgba(0,0,0,0.6);';
+  overlay.appendChild(img);
+  document.body.appendChild(overlay);
 }
 
 // ── JOURNAL TOOLBAR ────────────────────────────────────
@@ -2693,15 +2574,10 @@ function jWrap(prefix, suffix){
 }
 
 function jClear(){
-  if(journalHandwriting){
-    if(!confirm('Clear canvas drawing?')) return;
-    clearCanvas();
-  } else {
-    if(!confirm('Clear today\'s journal entry?')) return;
-    const ta = document.getElementById('journalEntry');
-    ta.value = '';
-    autoSaveJournal();
-  }
+  if(!confirm('Clear today\'s journal entry?')) return;
+  const ta = document.getElementById('journalEntry');
+  ta.value = '';
+  autoSaveJournal();
 }
 
 function jNumberedList(){
