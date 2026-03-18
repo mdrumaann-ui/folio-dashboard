@@ -1027,6 +1027,17 @@ tbody tr:last-child td{border-bottom:none;}
   line-height:1.8;
   letter-spacing:0.3px;
 }
+/* HANDWRITING CANVAS */
+.journal-canvas-wrap{position:relative;border-radius:8px;overflow:hidden;border:2px solid var(--accent);background:#fffef5;}
+.journal-canvas-wrap.dark-canvas{background:#1e2030;}
+#journalCanvas{display:block;width:100%;touch-action:none;cursor:crosshair;}
+.canvas-toolbar{display:flex;gap:6px;align-items:center;padding:6px 10px;background:var(--s3);border-radius:6px;border:1px solid var(--border);flex-wrap:wrap;margin-bottom:6px;}
+.ctool-color{width:18px;height:18px;border-radius:50%;border:2px solid transparent;cursor:pointer;transition:all 0.15s;flex-shrink:0;}
+.ctool-color.active,.ctool-color:hover{border-color:var(--accent);transform:scale(1.2);}
+.ctool-range{width:70px;accent-color:var(--accent);cursor:pointer;}
+.ctool-btn{background:none;border:1px solid var(--border);color:var(--muted);padding:3px 8px;border-radius:4px;cursor:pointer;font-size:0.68rem;font-family:'Inter',sans-serif;transition:all 0.15s;}
+.ctool-btn:hover{border-color:var(--accent);color:var(--accent);}
+.ctool-btn.active{background:var(--accent);color:#fff;border-color:var(--accent);}
 .journal-save-status{font-size:0.62rem;color:var(--muted);}
 .search-results{background:var(--s2);border:1px solid var(--border);border-radius:7px;padding:8px;display:none;max-height:160px;overflow-y:auto;}
 .search-result-item{padding:6px 0;border-bottom:1px solid var(--border);cursor:pointer;}
@@ -1341,18 +1352,42 @@ tbody tr:last-child td{border-bottom:none;}
           <button class="jtool" onclick="jInsert('⚠️ ','',true)" title="Risk note">⚠️ Risk</button>
           <button class="jtool" onclick="jInsert('💡 ','',true)" title="Idea">💡 Idea</button>
           <div class="jtool-sep"></div>
-          <button class="jtool" id="btnHandwriting" onclick="toggleJournalHandwriting()" title="Toggle handwriting font">✍️ Handwriting</button>
+          <button class="jtool" id="btnHandwriting" onclick="toggleJournalHandwriting()" title="Toggle canvas handwriting mode (stylus/touch)">✍️ Handwriting</button>
           <button class="jtool" id="btnRuled" onclick="toggleJournalRuled()" title="Toggle ruled lines">📄 Lines</button>
           <div class="jtool-sep"></div>
           <button class="jtool" onclick="jClear()" title="Clear entry" style="color:var(--loss)">✕ Clear</button>
         </div>
 
-        <!-- TEXTAREA — wrapped for ruled lines support -->
+        <!-- CANVAS TOOLBAR — shown only in handwriting mode -->
+        <div class="canvas-toolbar" id="canvasToolbar" style="display:none">
+          <span style="font-size:0.6rem;color:var(--muted);font-weight:600">Pen:</span>
+          <div class="ctool-color active" style="background:#1a1d27" data-color="#1a1d27" onclick="setCanvasColor(this)" title="Black"></div>
+          <div class="ctool-color" style="background:#6c63ff" data-color="#6c63ff" onclick="setCanvasColor(this)" title="Purple"></div>
+          <div class="ctool-color" style="background:#00897b" data-color="#00897b" onclick="setCanvasColor(this)" title="Teal"></div>
+          <div class="ctool-color" style="background:#e53935" data-color="#e53935" onclick="setCanvasColor(this)" title="Red"></div>
+          <div class="ctool-color" style="background:#1565c0" data-color="#1565c0" onclick="setCanvasColor(this)" title="Blue"></div>
+          <div class="ctool-sep" style="width:1px;height:18px;background:var(--border);margin:0 3px"></div>
+          <span style="font-size:0.6rem;color:var(--muted)">Size:</span>
+          <input type="range" class="ctool-range" id="canvasPenSize" min="1" max="12" value="2" oninput="updatePenSize(this.value)">
+          <span id="penSizeLabel" style="font-size:0.65rem;color:var(--muted);min-width:16px">2</span>
+          <div class="ctool-sep" style="width:1px;height:18px;background:var(--border);margin:0 3px"></div>
+          <button class="ctool-btn" id="btnEraser" onclick="toggleEraser()">◻ Eraser</button>
+          <button class="ctool-btn" onclick="undoCanvas()">↩ Undo</button>
+          <button class="ctool-btn" onclick="clearCanvas()" style="color:var(--loss)">✕ Clear</button>
+          <button class="ctool-btn" onclick="saveCanvasAsImage()" style="margin-left:auto">⬇ Save PNG</button>
+        </div>
+
+        <!-- TEXTAREA (normal + ruled mode) -->
         <div class="journal-ruled-wrap" id="journalRuledWrap">
           <div class="journal-ruled-lines" id="journalRuledLines" style="display:none"></div>
           <textarea class="journal-textarea" id="journalEntry"
-            placeholder="Write your thoughts, trade notes, market observations...&#10;&#10;Use the toolbar above to format. Click ✍️ for handwriting mode, 📄 for ruled lines."
+            placeholder="Write your thoughts, trade notes, market observations...&#10;&#10;Use the toolbar above. Click ✍️ to switch to handwriting/stylus canvas."
             oninput="autoSaveJournal()"></textarea>
+        </div>
+
+        <!-- CANVAS (handwriting mode) -->
+        <div class="journal-canvas-wrap" id="journalCanvasWrap" style="display:none">
+          <canvas id="journalCanvas" height="600"></canvas>
         </div>
       </div>
     </div>
@@ -1802,18 +1837,25 @@ function renderOverview(d){
   const pl=st.pos_loss_pct;
   document.getElementById('holdTbody').innerHTML=d.holdings.map(h=>{
     const customLimit=stockRiskLimits[h.tradingsymbol]||pl;
-    const lp=Math.abs(h.pnl_pct);
-    const ratio=lp/customLimit;
-    const barClr=h.pnl_pct>=0?'var(--gain)':ratio>=1?'var(--loss)':ratio>=0.8?'var(--orange)':ratio>=0.5?'var(--warn)':'var(--gain)';
-    const badge=h.pnl_pct>=0?`<span class="sri-badge badge-ok">OK</span>`:ratio>=1?`<span class="sri-badge badge-bad">🔴 BREACH</span>`:ratio>=0.8?`<span class="sri-badge badge-orange">🟠 SOON</span>`:ratio>=0.5?`<span class="sri-badge badge-warn">🟡 WATCH</span>`:`<span class="sri-badge badge-ok">🟢 OK</span>`;
+    // ratio only meaningful when stock is DOWN — use negative pnl_pct as loss magnitude
+    const lossPct = h.pnl_pct < 0 ? Math.abs(h.pnl_pct) : 0;
+    const ratio = lossPct / customLimit;  // 0 for profit stocks, >0 only for losers
+    const isProfit = h.pnl_pct >= 0;
+    const barClr = isProfit ? 'var(--gain)' : ratio>=1?'var(--loss)':ratio>=0.8?'var(--orange)':ratio>=0.5?'var(--warn)':'var(--gain)';
+    const badge = isProfit
+      ? `<span class="sri-badge badge-ok">🟢 OK</span>`
+      : ratio>=1 ? `<span class="sri-badge badge-bad">🔴 BREACH</span>`
+      : ratio>=0.8 ? `<span class="sri-badge badge-orange">🟠 SOON</span>`
+      : ratio>=0.5 ? `<span class="sri-badge badge-warn">🟡 WATCH</span>`
+      : `<span class="sri-badge badge-ok">🟢 OK</span>`;
     const exchange=h.exchange||'NSE';
     const tvUrl=`https://www.tradingview.com/chart/?symbol=${exchange}%3A${h.tradingsymbol}`;
     const kiteUrl=`https://kite.zerodha.com/positions`;
     const isCustom=stockRiskLimits[h.tradingsymbol]!==undefined;
-    // % Risk = the limit set (custom or global), coloured by how close to breach
-    const riskColor = ratio>=1?'var(--loss)':ratio>=0.8?'var(--orange)':ratio>=0.5?'var(--warn)':'var(--muted)';
-    // Sell button: only show when loss has breached the limit
-    const sellBtn = ratio>=1 ? `<a href="${kiteUrl}" target="_blank" class="sell-btn" title="Loss limit breached — sell in Kite">Sell</a>` : '';
+    // Risk colour: muted for profit stocks, colour-coded only for losers
+    const riskColor = isProfit ? 'var(--muted)' : ratio>=1?'var(--loss)':ratio>=0.8?'var(--orange)':ratio>=0.5?'var(--warn)':'var(--muted)';
+    // Sell button: ONLY show when stock is in loss AND has breached the limit
+    const sellBtn = (!isProfit && ratio>=1) ? `<a href="${kiteUrl}" target="_blank" class="sell-btn" title="Loss limit breached — sell in Kite">Sell</a>` : '';
     return `<tr>
       <td><a href="${tvUrl}" target="_blank" style="text-decoration:none;display:flex;align-items:center;gap:3px"><span class="tk tv-link">${h.tradingsymbol}</span><span style="font-size:0.55rem;color:var(--muted)">↗</span></a></td>
       <td>${h.quantity}</td>
@@ -1827,7 +1869,7 @@ function renderOverview(d){
       <td style="color:${riskColor};font-size:0.72rem">${customLimit}%</td>
       <td>
         <div style="display:flex;align-items:center;gap:3px;flex-wrap:wrap">${badge}<button class="risk-edit-btn" onclick="openRiskModal('${h.tradingsymbol}',${customLimit})">${isCustom?customLimit+'%':''} ✎</button>${sellBtn}</div>
-        <div class="mini-bar"><div class="mini-fill" style="width:${h.pnl_pct>=0?100:Math.min(ratio*100,100)}%;background:${barClr}"></div></div>
+        <div class="mini-bar"><div class="mini-fill" style="width:${isProfit?100:Math.min(ratio*100,100)}%;background:${barClr}"></div></div>
       </td>
     </tr>`;
   }).join('');
@@ -2115,7 +2157,7 @@ function renderCalendar(){
       const data    = plMap[dateStr];
       const bg      = calColor(data?.pl, maxPL);
       const isToday = today.toISOString().split('T')[0]===dateStr;
-      const title   = data ? `${dateStr}: ${data.pl>=0?'+':''}${fmtL(data.pl)}` : dateStr;
+      const title   = data ? dateStr : dateStr;  // no value in tooltip when blurred
       html+=`<div
         style="width:11px;height:11px;border-radius:2px;background:${bg};cursor:pointer;${isToday?'outline:1.5px solid var(--accent);outline-offset:1px':''}"
         onclick="showCalDay('${dateStr}',${data?data.pl:0})"
@@ -2150,7 +2192,14 @@ function showCalDay(date, pl){
   detail.style.display='block';
   document.getElementById('calDayDetailText').innerHTML=
     `<strong>${new Date(date).toLocaleDateString('en-IN',{day:'2-digit',month:'long',year:'numeric'})}</strong>
-     — P&L: <span style="color:${pl>=0?'var(--gain)':'var(--loss)'}"><strong>${pl>=0?'+':''}${fmtL(pl)}</strong></span>`;
+     — P&L: <span style="color:${pl>=0?'var(--gain)':'var(--loss)'}" class="blur-val"><strong>${pl>=0?'+':''}${fmtL(pl)}</strong></span>`;
+  // Re-wire blur click handler if blur is active
+  if(blurActive){
+    document.querySelectorAll('#calDayDetail .blur-val').forEach(el=>{
+      el.style.cursor='pointer'; el.title='Click to peek';
+      el.onclick=function(e){e.stopPropagation();this.classList.toggle('peek');if(this.classList.contains('peek')){clearTimeout(this._pt);this._pt=setTimeout(()=>this.classList.remove('peek'),2000);}};
+    });
+  }
 }
 
 function calNavYear(dir){
@@ -2355,40 +2404,211 @@ function showSectorDetail(name, data, color, totalVal){
 }
 
 // ── JOURNAL ────────────────────────────────────────────
-// ── JOURNAL HANDWRITING & RULED LINES ──────────────────
+// ── JOURNAL HANDWRITING CANVAS & RULED LINES ───────────
 let journalHandwriting=false, journalRuled=false;
+let canvasCtx=null, canvasDrawing=false, canvasColor='#1a1d27', canvasPenSize=2, canvasEraser=false;
+let canvasHistory=[], canvasHistoryMax=30;
+let lastX=0, lastY=0;
 
 function toggleJournalHandwriting(){
   journalHandwriting=!journalHandwriting;
-  const ta=document.getElementById('journalEntry');
   const btn=document.getElementById('btnHandwriting');
-  ta.classList.toggle('handwriting',journalHandwriting);
+  const wrap=document.getElementById('journalRuledWrap');
+  const canvasWrap=document.getElementById('journalCanvasWrap');
+  const toolbar=document.getElementById('canvasToolbar');
   btn.classList.toggle('active',journalHandwriting);
-  // When handwriting is on, also use ruled lines for authentic feel
-  if(journalHandwriting&&!journalRuled) toggleJournalRuled();
+  if(journalHandwriting){
+    wrap.style.display='none';
+    canvasWrap.style.display='block';
+    toolbar.style.display='flex';
+    // Init canvas
+    initCanvas();
+    // Update canvas bg for theme
+    canvasWrap.classList.toggle('dark-canvas',isDark);
+    const ctx=document.getElementById('journalCanvas').getContext('2d');
+    // Adapt default pen color for dark/light
+    if(isDark && canvasColor==='#1a1d27') setCanvasColorDirect('#e8eaf6');
+  } else {
+    wrap.style.display='block';
+    canvasWrap.style.display='none';
+    toolbar.style.display='none';
+    btn.classList.remove('active');
+    // If was also in ruled mode, re-apply
+    if(journalRuled) applyRuledLines();
+  }
+}
+
+function initCanvas(){
+  const canvas=document.getElementById('journalCanvas');
+  const wrap=document.getElementById('journalCanvasWrap');
+  // Set canvas resolution to match display
+  const w=wrap.clientWidth||700;
+  canvas.width=w;
+  canvas.height=600;
+  canvasCtx=canvas.getContext('2d');
+  canvasCtx.lineCap='round';
+  canvasCtx.lineJoin='round';
+  canvasCtx.strokeStyle=canvasColor;
+  canvasCtx.lineWidth=canvasPenSize;
+  // Fill background
+  canvasCtx.fillStyle=isDark?'#1e2030':'#fffef5';
+  canvasCtx.fillRect(0,0,canvas.width,canvas.height);
+  // Draw ruled lines if enabled
+  if(journalRuled) drawCanvasRuledLines();
+  // Save blank state
+  canvasHistory=[canvasCtx.getImageData(0,0,canvas.width,canvas.height)];
+  // Wire pointer events (works for mouse, touch, and stylus/S-Pen)
+  canvas.onpointerdown=canvasStart;
+  canvas.onpointermove=canvasDraw;
+  canvas.onpointerup=canvasEnd;
+  canvas.onpointerout=canvasEnd;
+  canvas.onpointercancel=canvasEnd;
+}
+
+function drawCanvasRuledLines(){
+  const canvas=document.getElementById('journalCanvas');
+  const ctx=canvasCtx;
+  const lineColor=isDark?'rgba(108,99,255,0.2)':'rgba(0,0,180,0.12)';
+  ctx.save();
+  ctx.strokeStyle=lineColor;
+  ctx.lineWidth=0.8;
+  const lineSpacing=32;
+  const marginLeft=60;
+  // Margin line
+  ctx.beginPath();ctx.strokeStyle='rgba(255,100,100,0.25)';ctx.moveTo(marginLeft,0);ctx.lineTo(marginLeft,canvas.height);ctx.stroke();
+  // Ruled lines
+  ctx.strokeStyle=lineColor;
+  for(let y=lineSpacing;y<canvas.height;y+=lineSpacing){
+    ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(canvas.width,y);ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function getCanvasPos(canvas, e){
+  const rect=canvas.getBoundingClientRect();
+  const scaleX=canvas.width/rect.width;
+  const scaleY=canvas.height/rect.height;
+  return {x:(e.clientX-rect.left)*scaleX, y:(e.clientY-rect.top)*scaleY};
+}
+
+function canvasStart(e){
+  e.preventDefault();
+  canvasDrawing=true;
+  const pos=getCanvasPos(this,e);
+  lastX=pos.x; lastY=pos.y;
+  canvasCtx.beginPath();
+  canvasCtx.moveTo(lastX,lastY);
+  // Dot for tap
+  canvasCtx.arc(lastX,lastY,canvasEraser?canvasPenSize*3:canvasPenSize/2,0,Math.PI*2);
+  canvasCtx.fillStyle=canvasEraser?(isDark?'#1e2030':'#fffef5'):canvasColor;
+  canvasCtx.fill();
+}
+
+function canvasDraw(e){
+  if(!canvasDrawing) return;
+  e.preventDefault();
+  const pos=getCanvasPos(this,e);
+  canvasCtx.beginPath();
+  canvasCtx.moveTo(lastX,lastY);
+  canvasCtx.lineTo(pos.x,pos.y);
+  if(canvasEraser){
+    canvasCtx.globalCompositeOperation='destination-out';
+    canvasCtx.lineWidth=canvasPenSize*6;
+    canvasCtx.strokeStyle='rgba(0,0,0,1)';
+  } else {
+    canvasCtx.globalCompositeOperation='source-over';
+    canvasCtx.lineWidth=canvasPenSize;
+    canvasCtx.strokeStyle=canvasColor;
+    // Pressure simulation via pointer pressure if available
+    if(e.pressure&&e.pressure>0) canvasCtx.lineWidth=canvasPenSize*(0.5+e.pressure*1.5);
+  }
+  canvasCtx.stroke();
+  lastX=pos.x; lastY=pos.y;
+}
+
+function canvasEnd(e){
+  if(!canvasDrawing) return;
+  canvasDrawing=false;
+  canvasCtx.globalCompositeOperation='source-over';
+  // Save to history
+  const canvas=document.getElementById('journalCanvas');
+  canvasHistory.push(canvasCtx.getImageData(0,0,canvas.width,canvas.height));
+  if(canvasHistory.length>canvasHistoryMax) canvasHistory.shift();
+}
+
+function undoCanvas(){
+  if(canvasHistory.length<=1) return;
+  canvasHistory.pop();
+  const canvas=document.getElementById('journalCanvas');
+  canvasCtx.putImageData(canvasHistory[canvasHistory.length-1],0,0);
+}
+
+function clearCanvas(){
+  const canvas=document.getElementById('journalCanvas');
+  canvasCtx.fillStyle=isDark?'#1e2030':'#fffef5';
+  canvasCtx.fillRect(0,0,canvas.width,canvas.height);
+  if(journalRuled) drawCanvasRuledLines();
+  canvasHistory=[canvasCtx.getImageData(0,0,canvas.width,canvas.height)];
+}
+
+function setCanvasColor(el){
+  document.querySelectorAll('.ctool-color').forEach(e=>e.classList.remove('active'));
+  el.classList.add('active');
+  setCanvasColorDirect(el.dataset.color);
+  canvasEraser=false;
+  document.getElementById('btnEraser').classList.remove('active');
+}
+
+function setCanvasColorDirect(color){
+  canvasColor=color;
+  if(canvasCtx){canvasCtx.strokeStyle=color;canvasCtx.fillStyle=color;}
+}
+
+function toggleEraser(){
+  canvasEraser=!canvasEraser;
+  document.getElementById('btnEraser').classList.toggle('active',canvasEraser);
+}
+
+function updatePenSize(val){
+  canvasPenSize=parseInt(val);
+  document.getElementById('penSizeLabel').textContent=val;
+  if(canvasCtx) canvasCtx.lineWidth=canvasPenSize;
+}
+
+function saveCanvasAsImage(){
+  const canvas=document.getElementById('journalCanvas');
+  const link=document.createElement('a');
+  const date=journalCurrentDate||new Date().toISOString().split('T')[0];
+  link.download=`journal-${date}.png`;
+  link.href=canvas.toDataURL('image/png');
+  link.click();
 }
 
 function toggleJournalRuled(){
   journalRuled=!journalRuled;
-  const wrap=document.getElementById('journalRuledWrap');
-  const lines=document.getElementById('journalRuledLines');
   const btn=document.getElementById('btnRuled');
+  if(btn) btn.classList.toggle('active',journalRuled);
+  if(journalHandwriting){
+    // Redraw canvas with/without ruled lines
+    initCanvas();
+  } else {
+    applyRuledLines();
+  }
+}
+
+function applyRuledLines(){
   const ta=document.getElementById('journalEntry');
+  if(!ta) return;
   if(journalRuled){
-    // Build ruled lines as SVG background
-    const lineH=28; // px per line (matches 1.7 line-height at ~0.84rem/13.4px * 1.7 ≈ 22.8, rounded)
-    wrap.style.background='var(--s2)';
-    ta.style.backgroundImage=`repeating-linear-gradient(to bottom, transparent 0px, transparent ${lineH-1}px, var(--border) ${lineH-1}px, var(--border) ${lineH}px)`;
+    const lineH=28;
+    ta.style.backgroundImage=`repeating-linear-gradient(to bottom,transparent 0px,transparent ${lineH-1}px,var(--border) ${lineH-1}px,var(--border) ${lineH}px)`;
     ta.style.backgroundSize=`100% ${lineH}px`;
-    ta.style.backgroundPositionY='14px'; // match padding-top
-    ta.classList.add('ruled');
+    ta.style.backgroundPositionY='14px';
   } else {
     ta.style.backgroundImage='';
     ta.style.backgroundSize='';
     ta.style.backgroundPositionY='';
-    ta.classList.remove('ruled');
   }
-  btn.classList.toggle('active',journalRuled);
 }
 
 function initJournal(){
@@ -2435,10 +2655,15 @@ function jWrap(prefix, suffix){
 }
 
 function jClear(){
-  if(!confirm('Clear today\'s journal entry?')) return;
-  const ta = document.getElementById('journalEntry');
-  ta.value = '';
-  autoSaveJournal();
+  if(journalHandwriting){
+    if(!confirm('Clear canvas drawing?')) return;
+    clearCanvas();
+  } else {
+    if(!confirm('Clear today\'s journal entry?')) return;
+    const ta = document.getElementById('journalEntry');
+    ta.value = '';
+    autoSaveJournal();
+  }
 }
 
 function jNumberedList(){
