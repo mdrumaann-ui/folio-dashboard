@@ -478,95 +478,17 @@ def api_refresh():
 
 @app.route("/api/nifty-pe")
 def api_nifty_pe():
-    """Fetch Nifty 50 PE ratio — tries multiple free sources."""
-    sources = [
-        # Source 1: NSE India market data API
-        ("https://www.nseindia.com/api/allIndices", "NSE"),
-        # Source 2: Yahoo Finance
-        ("https://query2.finance.yahoo.com/v10/finance/quoteSummary/%5ENSEI?modules=summaryDetail", "Yahoo"),
-    ]
-    
-    # Try NSE India
-    try:
-        session_req = urllib.request.Request(
-            "https://www.nseindia.com",
-            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
-        )
-        import http.cookiejar
-        jar = http.cookiejar.CookieJar()
-        opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
-        opener.open(session_req, timeout=5)  # get cookies
-        
-        api_req = urllib.request.Request(
-            "https://www.nseindia.com/api/allIndices",
-            headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                "Accept": "application/json, text/plain, */*",
-                "Accept-Language": "en-US,en;q=0.9",
-                "Referer": "https://www.nseindia.com/",
-                "X-Requested-With": "XMLHttpRequest",
-            }
-        )
-        with opener.open(api_req, timeout=8) as r:
-            data = json.loads(r.read().decode())
-        for item in data.get("data", []):
-            if item.get("index") == "NIFTY 50":
-                pe = item.get("pe")
-                pb = item.get("pb")
-                div = item.get("divYield")
-                if pe:
-                    return jsonify({
-                        "pe": round(float(pe), 2),
-                        "pb": round(float(pb), 2) if pb else None,
-                        "div_yield": round(float(div), 2) if div else None,
-                        "source": "NSE India"
-                    })
-    except Exception as e:
-        print(f"NSE PE fetch failed: {e}")
-
-    # Try Yahoo Finance v1 with better headers
-    try:
-        req = urllib.request.Request(
-            "https://query1.finance.yahoo.com/v10/finance/quoteSummary/%5ENSEI?modules=summaryDetail",
-            headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                     "Accept": "application/json", "Accept-Language": "en-US,en;q=0.9"}
-        )
-        with urllib.request.urlopen(req, timeout=6) as r:
-            data = json.loads(r.read().decode())
-        pe = data["quoteSummary"]["result"][0]["summaryDetail"].get("trailingPE", {}).get("raw")
-        if pe:
-            return jsonify({"pe": round(pe, 2), "source": "Yahoo Finance"})
-    except Exception as e:
-        print(f"Yahoo PE fetch failed: {e}")
-
-    # Try Screener.in public chart API
-    try:
-        req = urllib.request.Request(
-            "https://www.screener.in/api/company/NIFTY/chart/?q=Price+to+Earning&days=30",
-            headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json",
-                     "X-Requested-With": "XMLHttpRequest"}
-        )
-        with urllib.request.urlopen(req, timeout=6) as r:
-            sdata = json.loads(r.read().decode())
-        datasets = sdata.get("datasets", [])
-        if datasets and datasets[0].get("values"):
-            latest = datasets[0]["values"][-1]
-            pe = float(latest[1]) if latest and len(latest) > 1 else None
-            if pe:
-                return jsonify({"pe": round(pe, 2), "source": "Screener.in"})
-    except Exception as e:
-        print(f"Screener PE fetch failed: {e}")
-
-    return jsonify({"pe": None, "error": "PE unavailable — NSE/Yahoo/Screener all blocked"}), 200
+    """PE is now fetched client-side by the browser. This stub returns empty."""
+    return jsonify({"pe": None, "note": "PE fetched client-side"}), 200
 
 
 @app.route("/api/ticker")
 def api_ticker():
-    """Fetch live index prices from Yahoo Finance — free, no API key needed."""
+    """Fetch live index prices — browser fetches PE directly, server just returns prices."""
     symbols = {
         "NIFTY50":   "^NSEI",
-        "MIDCAP100": "NIFTY_MIDCAP_100.NS",  # Yahoo Finance symbol for Nifty Midcap 100
-        "SMALLCAP":  "^CNXSC",        # NSE Smallcap 100
+        "MIDCAP100": "NIFTY_MIDCAP_100.NS",
+        "SMALLCAP":  "^CNXSC",
     }
     result = {}
     for name, sym in symbols.items():
@@ -580,67 +502,11 @@ def api_ticker():
             prev  = meta.get("chartPreviousClose", price)
             chg   = price - prev
             chgPct= (chg / prev * 100) if prev else 0
-            entry = {
+            result[name] = {
                 "price":     round(price, 2),
                 "change":    round(chg, 2),
                 "changePct": round(chgPct, 2),
             }
-            # PE ratio for Nifty 50 — cascade through multiple sources
-            if name == "NIFTY50":
-                pe_val = None
-                # Source 1: NSE India allIndices (most accurate, needs cookie)
-                try:
-                    import http.cookiejar
-                    jar2 = http.cookiejar.CookieJar()
-                    opener2 = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar2))
-                    opener2.open(urllib.request.Request(
-                        "https://www.nseindia.com",
-                        headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36"}
-                    ), timeout=4)
-                    idx_req = urllib.request.Request(
-                        "https://www.nseindia.com/api/allIndices",
-                        headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                                 "Accept": "application/json", "Referer": "https://www.nseindia.com/",
-                                 "X-Requested-With": "XMLHttpRequest"}
-                    )
-                    with opener2.open(idx_req, timeout=6) as pr:
-                        idx_data = json.loads(pr.read().decode())
-                    for item in idx_data.get("data", []):
-                        if item.get("index") == "NIFTY 50" and item.get("pe"):
-                            pe_val = round(float(item["pe"]), 1)
-                            break
-                except: pass
-                # Source 2: Yahoo Finance quoteSummary
-                if not pe_val:
-                    try:
-                        yf_req = urllib.request.Request(
-                            "https://query1.finance.yahoo.com/v10/finance/quoteSummary/%5ENSEI?modules=summaryDetail",
-                            headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
-                                     "Accept": "application/json", "Accept-Language": "en-US,en;q=0.9"}
-                        )
-                        with urllib.request.urlopen(yf_req, timeout=5) as pr2:
-                            yf_data = json.loads(pr2.read().decode())
-                        raw_pe = yf_data["quoteSummary"]["result"][0]["summaryDetail"].get("trailingPE", {}).get("raw")
-                        if raw_pe: pe_val = round(float(raw_pe), 1)
-                    except: pass
-                # Source 3: Screener.in
-                if not pe_val:
-                    try:
-                        sc_req = urllib.request.Request(
-                            "https://www.screener.in/api/company/NIFTY/chart/?q=Price+to+Earning&days=30",
-                            headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json",
-                                     "X-Requested-With": "XMLHttpRequest"}
-                        )
-                        with urllib.request.urlopen(sc_req, timeout=5) as pr3:
-                            sc_data = json.loads(pr3.read().decode())
-                        datasets = sc_data.get("datasets", [])
-                        if datasets and datasets[0].get("values"):
-                            latest = datasets[0]["values"][-1]
-                            if latest and len(latest) > 1:
-                                pe_val = round(float(latest[1]), 1)
-                    except: pass
-                entry["pe"] = pe_val
-            result[name] = entry
         except Exception as e:
             result[name] = {"price": 0, "change": 0, "changePct": 0, "error": str(e)}
     return jsonify(result)
@@ -1747,42 +1613,69 @@ function showDashboard(name){
   }
 }
 let tickerTimer=null;
-function fetchNiftyPE(){
-  // PE is fetched as part of updateIndexTickers() via /api/ticker
-  // This is now a no-op — PE display is handled in updateIndexTickers
+// ── NIFTY PE — fetched directly by browser from Yahoo Finance ─────
+// The server has no internet access, so browser does this directly.
+async function fetchNiftyPE(){
+  const peDisp = document.getElementById('peDisplay');
+  const peNote = document.getElementById('peNote');
+  if(peDisp) peDisp.textContent = '…';
+
+  // Try Yahoo Finance quoteSummary directly from browser
+  const urls = [
+    'https://query1.finance.yahoo.com/v10/finance/quoteSummary/%5ENSEI?modules=summaryDetail',
+    'https://query2.finance.yahoo.com/v10/finance/quoteSummary/%5ENSEI?modules=summaryDetail',
+  ];
+  for(const url of urls){
+    try{
+      const r = await fetch(url, {headers:{'Accept':'application/json'}});
+      if(!r.ok) continue;
+      const d = await r.json();
+      const pe = d?.quoteSummary?.result?.[0]?.summaryDetail?.trailingPE?.raw;
+      if(pe){
+        displayPE(pe);
+        return;
+      }
+    }catch(e){}
+  }
+
+  // Try NSE India directly from browser (browser can handle the cookies/CORS better)
+  try{
+    // First get session cookies
+    await fetch('https://www.nseindia.com', {mode:'no-cors', credentials:'include'});
+    const r = await fetch('https://www.nseindia.com/api/allIndices', {
+      headers:{'Accept':'application/json','X-Requested-With':'XMLHttpRequest'},
+      credentials:'include'
+    });
+    if(r.ok){
+      const d = await r.json();
+      const item = (d?.data||[]).find(x=>x.index==='NIFTY 50');
+      if(item?.pe){ displayPE(parseFloat(item.pe)); return; }
+    }
+  }catch(e){}
+
+  // Nothing worked
+  if(peDisp) peDisp.textContent = '—';
+  if(peNote) peNote.textContent = 'unavailable';
+}
+
+function displayPE(pe){
+  const peDisp = document.getElementById('peDisplay');
+  const peNote = document.getElementById('peNote');
+  if(peDisp) peDisp.textContent = pe.toFixed(1)+'x';
+  const note = pe>25?'⚠️ Expensive':pe>22?'~ Fair value':pe>18?'✓ Reasonable':'✅ Cheap';
+  if(peNote) peNote.textContent = note;
 }
 
 function startAuto(){
   stopAuto();
   autoTimer=setInterval(loadData,60000);
-  updateIndexTickers();  // fetch immediately
-  tickerTimer=setInterval(updateIndexTickers,300000); // refresh every 5 min
+  updateIndexTickers();
+  tickerTimer=setInterval(updateIndexTickers,300000);
 }
 function stopAutoTicker(){if(tickerTimer){clearInterval(tickerTimer);tickerTimer=null;}}
 function stopAuto(){if(autoTimer){clearInterval(autoTimer);autoTimer=null;}}
 
-// ── LOAD DATA ──────────────────────────────────────────
-async function loadData(){
-  const params=new URLSearchParams({cagr_target:document.getElementById('cagrTarget').value,max_loss_pct:document.getElementById('maxLoss').value,pos_loss_pct:document.getElementById('posLoss').value,invested_since:'2020-01-01'});
-  try{
-    const r=await fetch(`/api/summary?${params}`);const d=await r.json();
-    if(d.error){
-      console.error('API error:', d.error, d.detail||'');
-      // Still show dashboard with error message
-      document.getElementById('alertBanner').className='alert alert-danger show';
-      document.getElementById('alertBanner').innerHTML=`⚠️ <strong>Data error:</strong> ${d.error}`;
-      return;
-    }
-    lastData=d;
-    if(d.stock_risks)stockRiskLimits=d.stock_risks;
-    renderOverview(d);
-    const t=new Date().toLocaleTimeString('en-IN');
-    document.getElementById('updatedBar').textContent='Updated '+t;
-    document.getElementById('updatedLbl').textContent=t;
-  }catch(e){console.error(e);}
-}
-
-// ── INDEX TICKERS (estimated from holdings data) ───────
+// ── INDEX TICKERS ──────────────────────────────────────
 async function updateIndexTickers(){
   try{
     const r = await fetch('/api/ticker');
@@ -1801,20 +1694,28 @@ async function updateIndexTickers(){
     setTicker('tn50',  'tc50',  d.NIFTY50);
     setTicker('tnMid', 'tcMid', d.MIDCAP100);
     setTicker('tnSml', 'tcSml', d.SMALLCAP);
-    // PE ratio — only in settings bar now
-    fetchNiftyPE();
     const upEl = document.getElementById('tickerUpdated');
     if(upEl) upEl.textContent = 'Updated '+new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
-    // Also update PE in settings bar
-    const peDisp = document.getElementById('peDisplay');
-    const peNote = document.getElementById('peNote');
-    if(peDisp && d.NIFTY50?.pe){
-      peDisp.textContent = d.NIFTY50.pe.toFixed(1)+'x';
-      const pe = d.NIFTY50.pe;
-      let note = pe > 25 ? '⚠ Expensive' : pe > 20 ? 'Fair value' : '✓ Cheap';
-      if(peNote) peNote.textContent = note;
-    }
   }catch(e){ console.log('Ticker fetch failed:', e); }
+}
+async function loadData(){
+  const params=new URLSearchParams({cagr_target:document.getElementById('cagrTarget').value,max_loss_pct:document.getElementById('maxLoss').value,pos_loss_pct:document.getElementById('posLoss').value,invested_since:'2020-01-01'});
+  try{
+    const r=await fetch(`/api/summary?${params}`);const d=await r.json();
+    if(d.error){
+      console.error('API error:', d.error, d.detail||'');
+      // Still show dashboard with error message
+      document.getElementById('alertBanner').className='alert alert-danger show';
+      document.getElementById('alertBanner').innerHTML=`⚠️ <strong>Data error:</strong> ${d.error}`;
+      return;
+    }
+    lastData=d;
+    if(d.stock_risks)stockRiskLimits=d.stock_risks;
+    renderOverview(d);
+    const t=new Date().toLocaleTimeString('en-IN');
+    document.getElementById('updatedBar').textContent='Updated '+t;
+    document.getElementById('updatedLbl').textContent=t;
+  }catch(e){console.error(e);}
 }
 
 // ── RENDER OVERVIEW ────────────────────────────────────
