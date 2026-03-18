@@ -780,7 +780,7 @@ DASHBOARD_HTML = r"""<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>folio · Live</title>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&family=Caveat:wght@400;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
 <style>
 :root{
@@ -990,8 +990,43 @@ tbody tr:last-child td{border-bottom:none;}
 .jtool:hover{border-color:var(--accent);color:var(--accent);}
 .jtool.active{background:var(--accent);color:#fff;border-color:var(--accent);}
 .jtool-sep{width:1px;background:var(--border);margin:2px 3px;}
+/* NORMAL textarea */
 .journal-textarea{background:var(--s2);border:1px solid var(--border);color:var(--text);padding:14px 16px;border-radius:8px;font-size:0.84rem;outline:none;width:100%;resize:vertical;font-family:'Inter',sans-serif;line-height:1.7;min-height:400px;}
 .journal-textarea:focus{border-color:var(--accent);}
+/* RULED LINES mode — textarea sits over a lined background */
+.journal-ruled-wrap{position:relative;border-radius:8px;overflow:hidden;border:1px solid var(--border);background:var(--s2);}
+.journal-ruled-wrap:focus-within{border-color:var(--accent);}
+.journal-ruled-lines{position:absolute;inset:0;pointer-events:none;overflow:hidden;}
+.journal-ruled-lines::after{
+  content:'';display:block;position:absolute;inset:0;
+  background-image:repeating-linear-gradient(
+    to bottom,
+    transparent 0px,
+    transparent calc(1.7em * 0.84rem - 1px),
+    var(--border) calc(1.7em * 0.84rem - 1px),
+    var(--border) calc(1.7em * 0.84rem)
+  );
+  background-size:100% calc(1.7 * 0.84rem * 16px);
+  top:14px;
+  opacity:0.5;
+}
+.journal-textarea.ruled{
+  background:transparent;
+  border:none;
+  border-radius:0;
+  outline:none;
+  position:relative;
+  z-index:1;
+  line-height:1.7;
+  font-size:0.84rem;
+}
+/* HANDWRITING mode */
+.journal-textarea.handwriting{
+  font-family:'Caveat','Dancing Script',cursive;
+  font-size:1.05rem;
+  line-height:1.8;
+  letter-spacing:0.3px;
+}
 .journal-save-status{font-size:0.62rem;color:var(--muted);}
 .search-results{background:var(--s2);border:1px solid var(--border);border-radius:7px;padding:8px;display:none;max-height:160px;overflow-y:auto;}
 .search-result-item{padding:6px 0;border-bottom:1px solid var(--border);cursor:pointer;}
@@ -1300,20 +1335,25 @@ tbody tr:last-child td{border-bottom:none;}
           <button class="jtool" onclick="jInsert('- [ ] ','',true)" title="Checkbox">☐ Todo</button>
           <button class="jtool" onclick="jNumberedList()" title="Numbered list">1. List</button>
           <div class="jtool-sep"></div>
-          <button class="jtool" onclick="jInsert('---
-','',true)" title="Divider">— Rule</button>
+          <button class="jtool" onclick="jInsert('---\n','',true)" title="Divider">— Rule</button>
           <button class="jtool" onclick="jInsert('> ','',true)" title="Quote">❝ Quote</button>
           <button class="jtool" onclick="jInsert('📈 ','',true)" title="Trade note">📈 Trade</button>
           <button class="jtool" onclick="jInsert('⚠️ ','',true)" title="Risk note">⚠️ Risk</button>
           <button class="jtool" onclick="jInsert('💡 ','',true)" title="Idea">💡 Idea</button>
           <div class="jtool-sep"></div>
+          <button class="jtool" id="btnHandwriting" onclick="toggleJournalHandwriting()" title="Toggle handwriting font">✍️ Handwriting</button>
+          <button class="jtool" id="btnRuled" onclick="toggleJournalRuled()" title="Toggle ruled lines">📄 Lines</button>
+          <div class="jtool-sep"></div>
           <button class="jtool" onclick="jClear()" title="Clear entry" style="color:var(--loss)">✕ Clear</button>
         </div>
 
-        <!-- TEXTAREA — fills remaining height -->
-        <textarea class="journal-textarea" id="journalEntry"
-          placeholder="Write your thoughts, trade notes, market observations...&#10;&#10;Use the toolbar above to add headers, bullet points, and more."
-          oninput="autoSaveJournal()"></textarea>
+        <!-- TEXTAREA — wrapped for ruled lines support -->
+        <div class="journal-ruled-wrap" id="journalRuledWrap">
+          <div class="journal-ruled-lines" id="journalRuledLines" style="display:none"></div>
+          <textarea class="journal-textarea" id="journalEntry"
+            placeholder="Write your thoughts, trade notes, market observations...&#10;&#10;Use the toolbar above to format. Click ✍️ for handwriting mode, 📄 for ruled lines."
+            oninput="autoSaveJournal()"></textarea>
+        </div>
       </div>
     </div>
   </div>
@@ -1321,81 +1361,29 @@ tbody tr:last-child td{border-bottom:none;}
 
 <!-- ══ PAGE: NEWS ═════════════════════════════════════ -->
 <div class="page" id="page-news">
-  <!-- SUB-TABS -->
-  <div style="display:flex;gap:4px;margin-bottom:12px;border-bottom:1px solid var(--border);padding-bottom:0">
-    <button class="nav-tab active" id="nstab-news" onclick="switchNewsTab('news',this)" style="font-size:0.7rem;padding:7px 14px">📰 Stock News</button>
-    <button class="nav-tab" id="nstab-twitter" onclick="switchNewsTab('twitter',this)" style="font-size:0.7rem;padding:7px 14px">🐦 @Prakashplutus</button>
-    <button class="nav-tab" id="nstab-events" onclick="switchNewsTab('events',this)" style="font-size:0.7rem;padding:7px 14px">📆 Upcoming Events</button>
-  </div>
-
-  <!-- STOCK NEWS SUB-PAGE -->
-  <div id="nspage-news">
-    <div class="panel">
-      <div class="panel-title">Stock News <span id="newsNote">for your holdings</span></div>
-      <!-- TAG FILTERS -->
-      <div class="news-filter-bar">
-        <span style="font-size:0.6rem;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:0.5px">Filter:</span>
-        <button class="nfbtn active" onclick="setNewsTagFilter('all',this)">All</button>
-        <button class="nfbtn" onclick="setNewsTagFilter('target_up',this)">🎯 Target ↑</button>
-        <button class="nfbtn" onclick="setNewsTagFilter('target_dn',this)">📉 Target ↓</button>
-        <button class="nfbtn" onclick="setNewsTagFilter('neutral',this)">Neutral</button>
-        <button class="nfbtn" onclick="setNewsTagFilter('announcement',this)">📢 Announce</button>
-        <button class="nfbtn" onclick="setNewsTagFilter('quarterly',this)">📊 Quarterly</button>
-        <button class="nfbtn" onclick="setNewsTagFilter('dividend',this)">💰 Dividend</button>
-        <button class="nfbtn" onclick="setNewsTagFilter('split',this)">✂️ Split</button>
-        <button class="nfbtn" onclick="setNewsTagFilter('bonus',this)">🎁 Bonus</button>
-      </div>
-      <!-- TICKER FILTER -->
-      <div class="nf-ticker-wrap" id="newsTickerFilter"></div>
-      <div id="newsContainer">
-        <div style="text-align:center;padding:30px;color:var(--muted);font-size:0.78rem">Loading news...</div>
-      </div>
+  <div class="panel">
+    <div class="panel-title">News &amp; Events <span id="newsNote"></span>
+      <button onclick="loadNews(lastData)" style="font-size:0.65rem;padding:3px 9px;border-radius:4px;border:1px solid var(--border);background:transparent;color:var(--accent);cursor:pointer">↻ Refresh</button>
     </div>
-  </div>
-
-  <!-- TWITTER SUB-PAGE -->
-  <div id="nspage-twitter" style="display:none">
-    <div class="panel">
-      <div class="panel-title">@Prakashplutus — Twitter / X Feed</div>
-      <div style="text-align:center;padding:20px 0 10px">
-        <a href="https://twitter.com/Prakashplutus" target="_blank"
-           style="display:inline-flex;align-items:center;gap:8px;background:var(--s2);border:1px solid var(--border);color:var(--text);padding:9px 18px;border-radius:7px;text-decoration:none;font-size:0.8rem;font-weight:600;transition:all 0.15s"
-           onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--border)'">
-          <span style="font-size:1.1rem">𝕏</span> Open @Prakashplutus on Twitter/X
-        </a>
-      </div>
-      <div style="margin-top:12px">
-        <div style="font-size:0.65rem;color:var(--muted);margin-bottom:10px;text-align:center">Embedded timeline · Live tweets from @Prakashplutus</div>
-        <div style="border:1px solid var(--border);border-radius:8px;overflow:hidden;min-height:400px;background:var(--s2)">
-          <a class="twitter-timeline"
-             id="twtTimelineEmbed"
-             data-height="600"
-             data-chrome="noheader nofooter transparent"
-             href="https://twitter.com/Prakashplutus?ref_src=twsrc%5Etfw">Tweets by Prakashplutus</a>
-          <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
-        </div>
-      </div>
-      <div style="margin-top:12px;padding:10px;background:var(--s2);border-radius:6px;border:1px solid var(--border)">
-        <div style="font-size:0.65rem;color:var(--muted);margin-bottom:6px;font-weight:600">Quick Links</div>
-        <div style="display:flex;flex-wrap:wrap;gap:8px">
-          <a href="https://twitter.com/Prakashplutus" target="_blank" style="font-size:0.7rem;color:var(--accent);text-decoration:none">→ Profile</a>
-          <a href="https://twitter.com/search?q=from%3APrakashplutus+stock&f=live" target="_blank" style="font-size:0.7rem;color:var(--accent);text-decoration:none">→ Stock tweets</a>
-          <a href="https://twitter.com/search?q=from%3APrakashplutus+buy&f=live" target="_blank" style="font-size:0.7rem;color:var(--accent);text-decoration:none">→ Buy calls</a>
-          <a href="https://twitter.com/search?q=from%3APrakashplutus+target&f=live" target="_blank" style="font-size:0.7rem;color:var(--accent);text-decoration:none">→ Targets</a>
-        </div>
-      </div>
+    <!-- TAG FILTERS — includes Upcoming Events as a tag -->
+    <div class="news-filter-bar">
+      <span style="font-size:0.6rem;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:0.5px">Filter:</span>
+      <button class="nfbtn active" id="nfbtn-all" onclick="setNewsTagFilter('all',this)">All</button>
+      <button class="nfbtn" id="nfbtn-events" onclick="setNewsTagFilter('events',this)">📆 Upcoming Events</button>
+      <button class="nfbtn" id="nfbtn-quarterly" onclick="setNewsTagFilter('quarterly',this)">📊 Quarterly</button>
+      <button class="nfbtn" id="nfbtn-dividend" onclick="setNewsTagFilter('dividend',this)">💰 Dividend</button>
+      <button class="nfbtn" id="nfbtn-target_up" onclick="setNewsTagFilter('target_up',this)">🎯 Target ↑</button>
+      <button class="nfbtn" id="nfbtn-target_dn" onclick="setNewsTagFilter('target_dn',this)">📉 Target ↓</button>
+      <button class="nfbtn" id="nfbtn-announcement" onclick="setNewsTagFilter('announcement',this)">📢 Announce</button>
+      <button class="nfbtn" id="nfbtn-split" onclick="setNewsTagFilter('split',this)">✂️ Split</button>
+      <button class="nfbtn" id="nfbtn-bonus" onclick="setNewsTagFilter('bonus',this)">🎁 Bonus</button>
+      <button class="nfbtn" id="nfbtn-neutral" onclick="setNewsTagFilter('neutral',this)">Neutral</button>
     </div>
-  </div>
-
-  <!-- UPCOMING EVENTS SUB-PAGE -->
-  <div id="nspage-events" style="display:none">
-    <div class="panel">
-      <div class="panel-title">Upcoming Events <span id="eventsNote">for your portfolio</span>
-        <button onclick="loadUpcomingEvents()" style="font-size:0.65rem;padding:3px 9px;border-radius:4px;border:1px solid var(--border);background:transparent;color:var(--accent);cursor:pointer">↻ Refresh</button>
-      </div>
-      <div id="eventsContainer">
-        <div style="text-align:center;padding:30px;color:var(--muted);font-size:0.78rem">Click Upcoming Events tab to load...</div>
-      </div>
+    <!-- STOCK FILTER -->
+    <div class="nf-ticker-wrap" id="newsTickerFilter"></div>
+    <!-- UNIFIED CONTAINER -->
+    <div id="newsContainer">
+      <div style="text-align:center;padding:30px;color:var(--muted);font-size:0.78rem">Loading news &amp; events...</div>
     </div>
   </div>
 </div>
@@ -1428,7 +1416,7 @@ let lastData=null, stockRiskLimits={}, riskModalTicker='';
 let journalData={}, journalCurrentDate='', journalSaveTimer=null;
 let calCurrentYear=new Date().getFullYear(), calCurrentMonth=new Date().getMonth();
 let activeSectors=new Set();
-let blurActive=false, newsTagFilter='all', newsTickerFilter='all';
+let blurActive=false, newsTagFilter='all', newsTickerFilter='all', allNewsItems=[], eventsLoaded=false;
 // NSE Sector Map — comprehensive list of NSE-listed stocks by sector
 // Add your specific holdings here if missing
 const SECTOR_MAP = {
@@ -1617,6 +1605,13 @@ function showDashboard(name){
   document.getElementById('blurBtn').style.display='inline-block';
   document.getElementById('kiteBtn').style.display='inline-block';
   document.getElementById('footerUser').textContent=name||'';
+  // Blur ₹ values by default on load
+  if(!blurActive){
+    blurActive=true;
+    document.body.classList.add('blur-mode');
+    const btn=document.getElementById('blurBtn');
+    if(btn){btn.textContent='👁 Show ₹';btn.style.borderColor='var(--warn)';btn.style.color='var(--warn)';}
+  }
 }
 let tickerTimer=null;
 async function fetchNiftyPE(){
@@ -2360,6 +2355,42 @@ function showSectorDetail(name, data, color, totalVal){
 }
 
 // ── JOURNAL ────────────────────────────────────────────
+// ── JOURNAL HANDWRITING & RULED LINES ──────────────────
+let journalHandwriting=false, journalRuled=false;
+
+function toggleJournalHandwriting(){
+  journalHandwriting=!journalHandwriting;
+  const ta=document.getElementById('journalEntry');
+  const btn=document.getElementById('btnHandwriting');
+  ta.classList.toggle('handwriting',journalHandwriting);
+  btn.classList.toggle('active',journalHandwriting);
+  // When handwriting is on, also use ruled lines for authentic feel
+  if(journalHandwriting&&!journalRuled) toggleJournalRuled();
+}
+
+function toggleJournalRuled(){
+  journalRuled=!journalRuled;
+  const wrap=document.getElementById('journalRuledWrap');
+  const lines=document.getElementById('journalRuledLines');
+  const btn=document.getElementById('btnRuled');
+  const ta=document.getElementById('journalEntry');
+  if(journalRuled){
+    // Build ruled lines as SVG background
+    const lineH=28; // px per line (matches 1.7 line-height at ~0.84rem/13.4px * 1.7 ≈ 22.8, rounded)
+    wrap.style.background='var(--s2)';
+    ta.style.backgroundImage=`repeating-linear-gradient(to bottom, transparent 0px, transparent ${lineH-1}px, var(--border) ${lineH-1}px, var(--border) ${lineH}px)`;
+    ta.style.backgroundSize=`100% ${lineH}px`;
+    ta.style.backgroundPositionY='14px'; // match padding-top
+    ta.classList.add('ruled');
+  } else {
+    ta.style.backgroundImage='';
+    ta.style.backgroundSize='';
+    ta.style.backgroundPositionY='';
+    ta.classList.remove('ruled');
+  }
+  btn.classList.toggle('active',journalRuled);
+}
+
 function initJournal(){
   const today=new Date();
   journalCurrentDate=today.toISOString().split('T')[0];
@@ -2528,20 +2559,7 @@ function jumpToToday(){
   loadJournalEntry(today.toISOString().split('T')[0]);
 }
 
-// ── NEWS ───────────────────────────────────────────────
-let allNewsItems = [];
-
-function switchNewsTab(tab, el){
-  ['news','twitter','events'].forEach(t=>{
-    document.getElementById('nspage-'+t).style.display=t===tab?'block':'none';
-    document.getElementById('nstab-'+t).classList.toggle('active',t===tab);
-  });
-  if(tab==='events') loadUpcomingEvents();
-  if(tab==='twitter'){
-    // Reload twitter widget in case theme changed
-    if(window.twttr && window.twttr.widgets) window.twttr.widgets.load();
-  }
-}
+// ── NEWS & EVENTS — unified ────────────────────────────
 
 function setNewsTagFilter(tag, el){
   newsTagFilter=tag;
@@ -2558,28 +2576,40 @@ function setNewsTickerFilter(ticker, el){
 }
 
 function tagNews(title){
-  const t=title.toLowerCase();
   const tags=[];
   if(/target.*(raise|increas|upgrad|hike|up|revise up)/i.test(title)||/price target.*increas/i.test(title)) tags.push({cls:'tag-up',label:'Target ↑',key:'target_up'});
   else if(/target.*(cut|lower|downgrad|reduc|slash|down)/i.test(title)||/price target.*cut/i.test(title)) tags.push({cls:'tag-dn',label:'Target ↓',key:'target_dn'});
-  if(/q[1-4]\s*(result|earning|profit|revenue|quarter)/i.test(t)||/quarterly result/i.test(t)||/quarter earn/i.test(t)) tags.push({cls:'tag-quarterly',label:'Quarterly',key:'quarterly'});
-  if(/dividend/i.test(t)) tags.push({cls:'tag-dividend',label:'Dividend',key:'dividend'});
-  if(/stock.?split|split.?stock/i.test(t)) tags.push({cls:'tag-split',label:'Split',key:'split'});
-  if(/bonus.?share|bonus.?issue/i.test(t)) tags.push({cls:'tag-bonus',label:'Bonus',key:'bonus'});
-  if(/board meeting|agm|egm|announce|approve|appoint|acqui|merger|buyback|open offer/i.test(t)) tags.push({cls:'tag-announce',label:'Announce',key:'announcement'});
+  if(/q[1-4]\s*(result|earning|profit|revenue|quarter)/i.test(title)||/quarterly result/i.test(title)) tags.push({cls:'tag-quarterly',label:'Quarterly',key:'quarterly'});
+  if(/dividend/i.test(title)) tags.push({cls:'tag-dividend',label:'Dividend',key:'dividend'});
+  if(/stock.?split|split.?stock/i.test(title)) tags.push({cls:'tag-split',label:'Split',key:'split'});
+  if(/bonus.?share|bonus.?issue/i.test(title)) tags.push({cls:'tag-bonus',label:'Bonus',key:'bonus'});
+  if(/board meeting|agm|egm|announce|approve|appoint|acqui|merger|buyback|open offer/i.test(title)) tags.push({cls:'tag-announce',label:'Announce',key:'announcement'});
   if(!tags.length) tags.push({cls:'tag-neutral',label:'Neutral',key:'neutral'});
   return tags;
 }
 
 function renderNewsItems(){
   const container=document.getElementById('newsContainer');
-  if(!allNewsItems.length){container.innerHTML=`<div style="text-align:center;padding:30px;color:var(--muted)">No news loaded.</div>`;return;}
+  if(!allNewsItems.length){container.innerHTML=`<div style="text-align:center;padding:30px;color:var(--muted)">No news loaded yet.</div>`;return;}
   let filtered=allNewsItems;
   if(newsTickerFilter!=='all') filtered=filtered.filter(n=>n.ticker===newsTickerFilter);
-  if(newsTagFilter!=='all') filtered=filtered.filter(n=>n.tags.some(t=>t.key===newsTagFilter));
-  if(!filtered.length){container.innerHTML=`<div style="text-align:center;padding:30px;color:var(--muted);font-size:0.78rem">No news matching this filter.</div>`;return;}
-  container.innerHTML=filtered.slice(0,30).map(n=>`
-    <div class="news-item">
+  if(newsTagFilter==='events') filtered=filtered.filter(n=>n.isEvent);
+  else if(newsTagFilter!=='all') filtered=filtered.filter(n=>!n.isEvent&&n.tags.some(t=>t.key===newsTagFilter));
+  if(!filtered.length){container.innerHTML=`<div style="text-align:center;padding:30px;color:var(--muted);font-size:0.78rem">No items matching this filter.</div>`;return;}
+  container.innerHTML=filtered.slice(0,40).map(n=>{
+    if(n.isEvent){
+      return `<div class="news-item">
+        <div style="display:flex;flex-direction:column;gap:3px;flex-shrink:0">
+          <div class="news-ticker">${n.ticker}</div>
+          <span class="event-type ${n.evCls}" style="font-size:0.58rem;padding:1px 6px;border-radius:3px;font-weight:700;display:inline-block;margin-top:2px">${n.evLabel}</span>
+        </div>
+        <div class="news-content">
+          <div class="news-title"><a href="${n.link||'#'}" target="_blank">${n.title}</a></div>
+          <div class="news-meta">${n.pubDate||''} · Corporate Event</div>
+        </div>
+      </div>`;
+    }
+    return `<div class="news-item">
       <div style="display:flex;flex-direction:column;gap:3px;flex-shrink:0">
         <div class="news-ticker">${n.ticker}</div>
         <div>${n.tags.map(t=>`<span class="news-tag ${t.cls}">${t.label}</span>`).join('')}</div>
@@ -2588,144 +2618,55 @@ function renderNewsItems(){
         <div class="news-title"><a href="${n.link}" target="_blank">${n.title}</a></div>
         <div class="news-meta">${n.pubDate||''} · ${n.source||'Google News'}</div>
       </div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
 }
 
 async function loadNews(d){
   const holdings=d?.holdings||[];
-  document.getElementById('newsNote').textContent=`for ${holdings.length} holdings`;
-  // Build ticker filter buttons
+  const noteEl=document.getElementById('newsNote');
+  if(noteEl) noteEl.textContent=`${holdings.length} holdings`;
   const tickerWrap=document.getElementById('newsTickerFilter');
-  if(tickerWrap) tickerWrap.innerHTML=`<span style="font-size:0.6rem;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:0.5px;align-self:center">Stock:</span>`
+  if(tickerWrap) tickerWrap.innerHTML=
+    `<span style="font-size:0.6rem;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:0.5px;align-self:center">Stock:</span>`
     +holdings.map(h=>`<button class="nf-ticker-btn" onclick="setNewsTickerFilter('${h.tradingsymbol}',this)">${h.tradingsymbol}</button>`).join('');
-
   const container=document.getElementById('newsContainer');
-  container.innerHTML=`<div style="text-align:center;padding:20px;color:var(--muted);font-size:0.75rem">Fetching news...</div>`;
-  allNewsItems=[];
-
-  try{
-    for(const h of holdings.slice(0,8)){
-      const query=encodeURIComponent(h.tradingsymbol+' NSE stock');
+  container.innerHTML=`<div style="text-align:center;padding:20px;color:var(--muted);font-size:0.75rem">Fetching news &amp; events...</div>`;
+  allNewsItems=[];eventsLoaded=false;
+  // Stock news
+  for(const h of holdings.slice(0,8)){
+    const query=encodeURIComponent(h.tradingsymbol+' NSE stock');
+    const rssUrl=`https://news.google.com/rss/search?q=${query}&hl=en-IN&gl=IN&ceid=IN:en`;
+    try{const r=await fetch(`/api/news-proxy?url=${encodeURIComponent(rssUrl)}`);if(r.ok){const items=await r.json();items.forEach(i=>{allNewsItems.push({...i,ticker:h.tradingsymbol,tags:tagNews(i.title||''),isEvent:false});});}}catch(e){}
+  }
+  // Events
+  for(const h of holdings.slice(0,8)){
+    for(const keyword of ['result date','dividend','board meeting','bonus share','stock split']){
+      const query=encodeURIComponent(`${h.tradingsymbol} ${keyword} 2025 2026`);
       const rssUrl=`https://news.google.com/rss/search?q=${query}&hl=en-IN&gl=IN&ceid=IN:en`;
       try{
         const r=await fetch(`/api/news-proxy?url=${encodeURIComponent(rssUrl)}`);
-        if(r.ok){
-          const items=await r.json();
-          items.forEach(i=>{
-            const tags=tagNews(i.title||'');
-            allNewsItems.push({...i,ticker:h.tradingsymbol,tags});
-          });
-        }
+        if(r.ok){const items=await r.json();items.slice(0,2).forEach(item=>{
+          const t=item.title||'';let evType='',evCls='',evLabel='';
+          if(/q[1-4].*(result|earning)|quarterly result|result date/i.test(t)){evType='earnings';evCls='ev-earnings';evLabel='📊 Earnings';}
+          else if(/dividend|interim div|final div/i.test(t)){evType='dividend';evCls='ev-dividend';evLabel='💰 Dividend';}
+          else if(/stock.?split/i.test(t)){evType='split';evCls='ev-split';evLabel='✂️ Split';}
+          else if(/bonus.?share/i.test(t)){evType='bonus';evCls='ev-bonus';evLabel='🎁 Bonus';}
+          else if(/board meeting|agm|record date/i.test(t)){evType='meeting';evCls='ev-earnings';evLabel='📋 Meeting';}
+          else return;
+          allNewsItems.push({ticker:h.tradingsymbol,title:t,link:item.link,pubDate:item.pubDate,isEvent:true,evType,evCls,evLabel,tags:[]});
+        });}
       }catch(e){}
     }
-    if(allNewsItems.length){
-      // Sort by date desc
-      allNewsItems.sort((a,b)=>new Date(b.pubDate||0)-new Date(a.pubDate||0));
-      renderNewsItems();
-    }else{
-      container.innerHTML=`<div style="text-align:center;padding:30px;color:var(--muted);font-size:0.78rem">
-        News requires the /api/news-proxy endpoint.<br>
-        <span style="font-size:0.68rem">Holdings: ${holdings.map(h=>`<a href="https://economictimes.indiatimes.com/markets/stocks/news" target="_blank" style="color:var(--accent)">${h.tradingsymbol}</a>`).join(', ')}</span><br><br>
-        <a href="https://economictimes.indiatimes.com/markets/stocks/news" target="_blank" style="color:var(--accent)">→ Economic Times</a>
-        &nbsp;·&nbsp;
-        <a href="https://www.moneycontrol.com/news/business/stocks/" target="_blank" style="color:var(--accent)">→ MoneyControl</a>
-      </div>`;
-    }
-  }catch(e){container.innerHTML=`<div style="text-align:center;padding:20px;color:var(--muted)">Could not load news.</div>`;}
-}
-
-// ── UPCOMING EVENTS (Earnings / Dividends / Splits) ────
-async function loadUpcomingEvents(){
-  const holdings=(lastData?.holdings)||[];
-  if(!holdings.length){document.getElementById('eventsContainer').innerHTML=`<div style="text-align:center;padding:20px;color:var(--muted)">No holdings found.</div>`;return;}
-  document.getElementById('eventsNote').textContent=`for ${holdings.length} stocks`;
-  const container=document.getElementById('eventsContainer');
-  container.innerHTML=`<div style="text-align:center;padding:20px;color:var(--muted);font-size:0.75rem">Loading events data...</div>`;
-
-  // Fetch events from Google News RSS — look for dividend/result/split/bonus keywords
-  const events=[];
-  const today=new Date();
-  const tickers=holdings.map(h=>h.tradingsymbol);
-
-  try{
-    for(const ticker of tickers.slice(0,10)){
-      // Search for upcoming events
-      for(const keyword of ['result date','dividend','board meeting','record date','bonus','split']){
-        const query=encodeURIComponent(`${ticker} ${keyword} 2025 2026`);
-        const rssUrl=`https://news.google.com/rss/search?q=${query}&hl=en-IN&gl=IN&ceid=IN:en`;
-        try{
-          const r=await fetch(`/api/news-proxy?url=${encodeURIComponent(rssUrl)}`);
-          if(r.ok){
-            const items=await r.json();
-            items.slice(0,2).forEach(item=>{
-              // Classify event type
-              const t=item.title.toLowerCase();
-              let evType='', evCls='', evLabel='';
-              if(/q[1-4].*(result|earning)|quarterly result|result date/i.test(item.title)){evType='earnings';evCls='ev-earnings';evLabel='📊 Earnings';}
-              else if(/dividend|interim div|final div/i.test(item.title)){evType='dividend';evCls='ev-dividend';evLabel='💰 Dividend';}
-              else if(/stock.?split|split.?stock/i.test(item.title)){evType='split';evCls='ev-split';evLabel='✂️ Split';}
-              else if(/bonus.?share/i.test(item.title)){evType='bonus';evCls='ev-bonus';evLabel='🎁 Bonus';}
-              else if(/board meeting|agm|record date/i.test(item.title)){evType='meeting';evCls='ev-earnings';evLabel='📋 Meeting';}
-              else return;
-              events.push({ticker,title:item.title,link:item.link,pubDate:item.pubDate,evType,evCls,evLabel});
-            });
-          }
-        }catch(e){}
-      }
-    }
-  }catch(e){}
-
-  if(!events.length){
-    container.innerHTML=`
-      <div style="text-align:center;padding:20px;color:var(--muted);font-size:0.78rem;margin-bottom:16px">
-        Live event data unavailable. Check these sources:
-      </div>
-      <div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-bottom:20px">
-        ${tickers.slice(0,15).map(t=>`
-          <a href="https://www.nseindia.com/get-quotes/equity?symbol=${t}" target="_blank"
-             style="font-size:0.68rem;color:var(--accent);background:var(--s2);padding:3px 8px;border-radius:4px;border:1px solid var(--border);text-decoration:none">${t}</a>`).join('')}
-      </div>
-      <div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:center">
-        <a href="https://www.nseindia.com/companies-listing/corporate-filings-event-calendar" target="_blank" style="font-size:0.72rem;color:var(--accent);text-decoration:none">→ NSE Event Calendar</a>
-        <a href="https://www.bseindia.com/corporates/ann.html" target="_blank" style="font-size:0.72rem;color:var(--accent);text-decoration:none">→ BSE Announcements</a>
-        <a href="https://trendlyne.com/earnings/upcoming/" target="_blank" style="font-size:0.72rem;color:var(--accent);text-decoration:none">→ Trendlyne Earnings</a>
-        <a href="https://www.screener.in/screens/upcoming-results/" target="_blank" style="font-size:0.72rem;color:var(--accent);text-decoration:none">→ Screener Upcoming</a>
-      </div>`;
-    return;
   }
-
-  // Group by event type
-  const grouped={earnings:[],dividend:[],split:[],bonus:[],meeting:[]};
-  events.forEach(e=>{if(grouped[e.evType]) grouped[e.evType].push(e);});
-
-  const sections=[
-    {key:'earnings',label:'📊 Earnings / Results'},
-    {key:'dividend',label:'💰 Dividends'},
-    {key:'split',label:'✂️ Stock Splits'},
-    {key:'bonus',label:'🎁 Bonus Shares'},
-    {key:'meeting',label:'📋 Board Meetings'},
-  ];
-
-  container.innerHTML=sections.filter(s=>grouped[s.key].length>0).map(s=>`
-    <div style="margin-bottom:16px">
-      <div style="font-size:0.68rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--muted);margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid var(--border)">${s.label}</div>
-      ${grouped[s.key].map(ev=>`
-        <div class="event-row">
-          <div class="event-ticker">${ev.ticker}</div>
-          <span class="event-type ${ev.evCls}">${ev.evLabel}</span>
-          <div style="flex:1;min-width:0">
-            <a href="${ev.link}" target="_blank" style="font-size:0.72rem;color:var(--text);text-decoration:none;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${ev.title}</a>
-            <div class="event-date">${ev.pubDate||''}</div>
-          </div>
-        </div>`).join('')}
-    </div>`).join('') +
-    `<div style="margin-top:12px;padding:8px;background:var(--s2);border-radius:6px;border:1px solid var(--border);font-size:0.65rem;color:var(--muted);display:flex;flex-wrap:wrap;gap:10px">
-      <span>For official dates:</span>
-      <a href="https://www.nseindia.com/companies-listing/corporate-filings-event-calendar" target="_blank" style="color:var(--accent);text-decoration:none">NSE Calendar</a>
-      <a href="https://trendlyne.com/earnings/upcoming/" target="_blank" style="color:var(--accent);text-decoration:none">Trendlyne</a>
-      <a href="https://www.screener.in/screens/upcoming-results/" target="_blank" style="color:var(--accent);text-decoration:none">Screener</a>
-    </div>`;
+  eventsLoaded=true;
+  allNewsItems.sort((a,b)=>new Date(b.pubDate||0)-new Date(a.pubDate||0));
+  if(allNewsItems.length){renderNewsItems();}
+  else{container.innerHTML=`<div style="text-align:center;padding:30px;color:var(--muted);font-size:0.78rem">Could not load news. <a href="https://economictimes.indiatimes.com/markets/stocks/news" target="_blank" style="color:var(--accent)">→ Economic Times</a></div>`;}
 }
+
+async function loadUpcomingEvents(){await loadNews(lastData);const btn=document.getElementById('nfbtn-events');if(btn)setNewsTagFilter('events',btn);}
+
 
 // ── RISK MODAL ─────────────────────────────────────────
 async function loadStockRiskLimits(){try{const r=await fetch('/api/stock-risks');const d=await r.json();stockRiskLimits=d||{};}catch(e){stockRiskLimits={};}}
