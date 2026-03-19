@@ -167,14 +167,23 @@ def load_history():
         return {}
 
 def save_snapshot(total_value, total_cost, cash, day_pl=0):
-    """Save/update today's snapshot. Updates day_pl on every call, other fields only once."""
+    """Save/update today's snapshot and track peak capital for drawdown calculation."""
     try:
-        today   = date.today().isoformat()
-        history = load_history()
+        today         = date.today().isoformat()
+        history       = load_history()
+        current_cap   = round(total_value + cash, 2)
+
+        # Peak capital = highest total capital ever recorded across all history
+        # Update it whenever current capital is higher
+        stored_peak   = history.get("__peak_capital__", 0)
+        peak_capital  = max(stored_peak, current_cap)
+        history["__peak_capital__"] = peak_capital
+
         if today in history:
-            # Update day_pl and value each refresh so calendar shows real intraday P&L
-            history[today]["day_pl"] = round(day_pl, 2)
-            history[today]["value"]  = round(total_value, 2)
+            history[today]["day_pl"]        = round(day_pl, 2)
+            history[today]["value"]         = round(total_value, 2)
+            history[today]["cash"]          = round(cash, 2)
+            history[today]["total_capital"] = current_cap
             action = "updated"
         else:
             history[today] = {
@@ -182,12 +191,13 @@ def save_snapshot(total_value, total_cost, cash, day_pl=0):
                 "value":         round(total_value, 2),
                 "invested":      round(total_cost, 2),
                 "cash":          round(cash, 2),
-                "total_capital": round(total_value + cash, 2),
+                "total_capital": current_cap,
                 "pl":            round(total_value - total_cost, 2),
                 "pl_pct":        round((total_value - total_cost) / total_cost * 100 if total_cost > 0 else 0, 2),
                 "day_pl":        round(day_pl, 2),
             }
             action = "created"
+
         if JSONBIN_BIN_ID and JSONBIN_API_KEY:
             data = json.dumps(history).encode()
             req  = urllib.request.Request(
@@ -195,16 +205,20 @@ def save_snapshot(total_value, total_cost, cash, day_pl=0):
                 headers={"Content-Type": "application/json", "X-Master-Key": JSONBIN_API_KEY}
             )
             urllib.request.urlopen(req, timeout=5)
-            print(f"Snapshot {action} for {today} (day_pl={day_pl:.2f}) → JSONBin")
+            print(f"Snapshot {action} for {today} | capital={current_cap} peak={peak_capital} day_pl={day_pl:.2f} → JSONBin")
         else:
             with open("portfolio_history.json", "w") as f:
                 json.dump(history, f, indent=2)
-            print(f"Snapshot {action} for {today} (day_pl={day_pl:.2f}) → portfolio_history.json")
+            print(f"Snapshot {action} for {today} | capital={current_cap} peak={peak_capital} day_pl={day_pl:.2f} → portfolio_history.json")
     except Exception as e:
         print(f"Could not save snapshot: {e}")
 
-def get_history_series():
-    """Return sorted list of daily snapshots — skips special keys like __journal__, __stock_risks__."""
+def get_peak_capital():
+    """Return the highest total capital ever recorded."""
+    history = load_history()
+    return history.get("__peak_capital__", 0)
+
+
     history = load_history()
     entries = []
     for k, v in history.items():
@@ -368,14 +382,21 @@ def api_summary():
         except:
             cash_avail = 0
 
-        # Risk based on TOTAL capital (holdings + cash)
+        # Total capital = current holdings value + cash
+        # This automatically reflects: sells (profit or loss), deposits, withdrawals
         total_capital = total_val + cash_avail
-        # Risk base = what you actually deployed (cost) + available cash
-        # Using total_cost not total_val so market movements don't shift your risk limit
-        # If fully invested (no cash), base = total_cost only
-        risk_base     = total_cost + cash_avail
-        max_loss_amt  = risk_base * (settings["max_loss_pct"] / 100)
-        actual_loss   = abs(total_pl) if total_pl < 0 else 0
+
+        # Peak capital = highest total capital ever recorded in history
+        # Falls back to current capital on very first run (no history yet)
+        peak_capital  = get_peak_capital() or total_capital
+
+        # Drawdown from peak = the true measure of how much you've lost
+        # Works across days/weeks/months — sold at loss, unrealised loss, all included
+        drawdown      = max(peak_capital - total_capital, 0)
+        max_loss_amt  = peak_capital * (settings["max_loss_pct"] / 100)
+        actual_loss   = drawdown
+        loss_used_pct = (actual_loss / max_loss_amt * 100) if max_loss_amt > 0 else 0
+        stop_investing = actual_loss >= max_loss_amt
         loss_used_pct = (actual_loss / max_loss_amt * 100) if max_loss_amt > 0 else 0
         stop_investing = actual_loss >= max_loss_amt
 
@@ -418,7 +439,8 @@ def api_summary():
                 "total_capital":  round(total_capital, 2),
             },
             "risk": {
-                "risk_base":      round(risk_base, 2),
+                "peak_capital":   round(peak_capital, 2),
+                "drawdown":       round(drawdown, 2),
                 "max_loss_amt":   round(max_loss_amt, 2),
                 "actual_loss":    round(actual_loss, 2),
                 "loss_used_pct":  round(loss_used_pct, 2),
@@ -1673,9 +1695,9 @@ function renderOverview(d){
 
   // ALERT
   const ab=document.getElementById('alertBanner');
-  if(rs.stop_investing){ab.className='alert alert-danger show';ab.innerHTML=`🚨 <strong>STOP INVESTING.</strong> Loss of <span class="blur-val">${fmtL(rs.actual_loss)}</span> exceeds ${st.max_loss_pct}% limit on total capital <span class="blur-val">₹${fmtL(p.total_capital)}</span>.`;}
-  else if(rs.loss_used_pct>70){ab.className='alert alert-warn show';ab.innerHTML=`⚠️ <strong>Caution.</strong> ${rs.loss_used_pct.toFixed(0)}% of loss budget used. Limit left: <span class="blur-val">${fmtL(rs.loss_remaining)}</span>.`;}
-  else{ab.className='alert alert-ok show';ab.innerHTML=`✅ <strong>All clear.</strong> Within risk limits. Total capital: <span class="blur-val">${fmtL(p.total_capital)}</span> · Cash: <span class="blur-val">${fmtL(p.cash_available)}</span>`;}
+  if(rs.stop_investing){ab.className='alert alert-danger show';ab.innerHTML=`🚨 <strong>STOP INVESTING.</strong> Drawdown of <span class="blur-val">${fmtL(rs.actual_loss)}</span> has hit your ${st.max_loss_pct}% limit on peak capital <span class="blur-val">${fmtL(rs.peak_capital)}</span>.`;}
+  else if(rs.loss_used_pct>70){ab.className='alert alert-warn show';ab.innerHTML=`⚠️ <strong>Caution.</strong> ${rs.loss_used_pct.toFixed(0)}% of drawdown limit used. Limit left: <span class="blur-val">${fmtL(rs.loss_remaining)}</span>.`;}
+  else{ab.className='alert alert-ok show';ab.innerHTML=`✅ <strong>All clear.</strong> Total capital: <span class="blur-val">${fmtL(p.total_capital)}</span> · Peak: <span class="blur-val">${fmtL(rs.peak_capital)}</span> · Cash: <span class="blur-val">${fmtL(p.cash_available)}</span>`;}
 
   // Re-wire blur peek on freshly injected blur-val spans in alert
   if(blurActive) setTimeout(()=>rewireBlurPeek(document.getElementById('alertBanner')),0);
@@ -1739,17 +1761,18 @@ function renderOverview(d){
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:7px">
       <div style="background:var(--s2);border-radius:5px;padding:8px;text-align:center">
-        <div style="font-size:0.6rem;color:var(--muted);margin-bottom:2px">RISK BASE</div>
-        <div style="font-weight:700;font-size:0.82rem" class="blur-val">${fmtL(rs.risk_base)}</div>
-        <div style="font-size:0.55rem;color:var(--muted);margin-top:1px">Invested + Cash</div>
+        <div style="font-size:0.6rem;color:var(--muted);margin-bottom:2px">PEAK CAPITAL</div>
+        <div style="font-weight:700;font-size:0.82rem" class="blur-val">${fmtL(rs.peak_capital)}</div>
+        <div style="font-size:0.55rem;color:var(--muted);margin-top:1px">Highest ever</div>
       </div>
       <div style="background:var(--s2);border-radius:5px;padding:8px;text-align:center">
         <div style="font-size:0.6rem;color:var(--muted);margin-bottom:2px">MAX LOSS LIMIT</div>
         <div style="font-weight:700;font-size:0.82rem;color:var(--loss)" class="blur-val">${fmtL(rs.max_loss_amt)}</div>
       </div>
       <div style="background:var(--s2);border-radius:5px;padding:8px;text-align:center">
-        <div style="font-size:0.6rem;color:var(--muted);margin-bottom:2px">CURRENT LOSS</div>
-        <div style="font-weight:700;font-size:0.82rem;color:${rs.actual_loss>0?'var(--loss)':'var(--gain)'}" class="blur-val">${rs.actual_loss>0?fmtL(rs.actual_loss):'None'}</div>
+        <div style="font-size:0.6rem;color:var(--muted);margin-bottom:2px">DRAWDOWN</div>
+        <div style="font-weight:700;font-size:0.82rem;color:${rs.actual_loss>0?'var(--loss)':'var(--gain)'}" class="blur-val">${rs.actual_loss>0?'-'+fmtL(rs.actual_loss):'None'}</div>
+        <div style="font-size:0.55rem;color:var(--muted);margin-top:1px">From peak</div>
       </div>
       <div style="background:var(--s2);border-radius:5px;padding:8px;text-align:center;border:1px solid ${rClr}40">
         <div style="font-size:0.6rem;color:var(--muted);margin-bottom:2px">LOSS LIMIT LEFT</div>
