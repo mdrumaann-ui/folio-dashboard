@@ -1928,11 +1928,9 @@ function renderGrowthChart(d){
   const notice=document.getElementById('growthNotice');
   if(notice)notice.textContent=isReal?`${(d.history||[]).length} real days`:'Estimated';
 
-  // Color portfolio line: green when above CAGR target, amber when below
-  // Green line when portfolio value has crossed the profit target
-  const aboveTarget = p.total_value >= profitTarget;
-  const lineColor   = aboveTarget ? 'var(--gain)' : 'var(--warn)';
-  const fillColor   = aboveTarget ? 'rgba(0,230,118,0.06)' : 'rgba(255,171,64,0.06)';
+  // Portfolio line: white in dark mode, black in light mode — always clearly visible
+  const lineColor = isDark ? '#ffffff' : '#1a1d2e';
+  const fillColor = isDark ? 'rgba(255,255,255,0.04)' : 'rgba(26,29,46,0.05)';
 
   const datasets=[
     {label:'Portfolio Value',data:valData,borderColor:lineColor,backgroundColor:fillColor,borderWidth:2.5,fill:true,tension:0.4,pointRadius:ptR,pointBackgroundColor:lineColor,pointBorderColor:isDark?'#0f1117':'#f4f6fb',pointBorderWidth:2,pointHoverRadius:5},
@@ -2297,29 +2295,61 @@ function renderSectors(d){
   };
 
   // LEGEND
-  // SECTOR ALLOCATION CARDS — compact, always visible, click to expand stock detail
+  // SECTOR ALLOCATION CARDS — each row expands inline below it on click, toggles closed on re-click
   document.getElementById('sectorRows').innerHTML = sectors.map(([name,v],i)=>{
-    const weight = (v.value/totalVal*100).toFixed(1);
-    const plClr  = v.pl>=0?'var(--gain)':'var(--loss)';
-    const barW   = Math.min(v.value/totalVal*100, 100);
-    return `<div style="display:flex;align-items:center;gap:10px;padding:7px 4px;border-bottom:1px solid var(--border);cursor:pointer"
-         onclick="expandPieSlice('${name}',null,'${COLORS[i%COLORS.length]}',${totalVal})"
-         onmouseover="this.style.background='var(--s3)'" onmouseout="this.style.background=''">
-      <div style="width:10px;height:10px;border-radius:2px;background:${COLORS[i%COLORS.length]};flex-shrink:0"></div>
-      <div style="flex:1;min-width:0">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
-          <span style="font-size:0.76rem;font-weight:600">${name}</span>
-          <span style="font-size:0.62rem;color:var(--muted)">${v.stocks.length} stock${v.stocks.length>1?'s':''}</span>
-        </div>
-        <div style="display:flex;align-items:center;gap:8px">
-          <div style="flex:1;height:4px;background:var(--s3);border-radius:2px;overflow:hidden">
-            <div style="height:100%;width:${barW}%;background:${COLORS[i%COLORS.length]};border-radius:2px"></div>
+    const weight  = (v.value/totalVal*100).toFixed(1);
+    const plClr   = v.pl>=0?'var(--gain)':'var(--loss)';
+    const barW    = Math.min(v.value/totalVal*100, 100);
+    const uid     = 'sec_'+i;
+    const sorted  = [...v.stocks].sort((a,b)=>b.current_value-a.current_value);
+    const totalSV = sorted.reduce((s,h)=>s+h.current_value,0);
+    const stocksHtml = sorted.map(h=>{
+      const sw     = (h.current_value/totalSV*100).toFixed(1);
+      const hPlClr = h.pnl>=0?'var(--gain)':'var(--loss)';
+      const hBarW  = Math.min(parseFloat(sw),100);
+      return `<div style="display:flex;align-items:center;gap:10px;padding:7px 12px 7px 22px;border-bottom:1px solid var(--border)"
+           onclick="window.open('https://www.tradingview.com/chart/?symbol=${h.exchange||'NSE'}%3A${h.tradingsymbol}','_blank')"
+           style="cursor:pointer" onmouseover="this.style.background='var(--s3)'" onmouseout="this.style.background=''">
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">
+            <span style="font-size:0.73rem;font-weight:700">${h.tradingsymbol} <span style="font-size:0.55rem;color:var(--muted);font-weight:400">↗</span></span>
+            <span style="font-size:0.7rem;font-weight:600;color:${hPlClr}" class="blur-val">${h.pnl>=0?'+':''}${fmtL(h.pnl)}</span>
           </div>
-          <span style="font-size:0.68rem;font-weight:600;color:${plClr};min-width:50px;text-align:right" class="blur-val">${v.pl>=0?'+':''}${fmtL(v.pl)}</span>
-          <span style="font-size:0.65rem;color:var(--muted);min-width:36px;text-align:right">${weight}%</span>
+          <div style="display:flex;align-items:center;gap:8px">
+            <div style="flex:1;height:3px;background:var(--s3);border-radius:2px;overflow:hidden">
+              <div style="height:100%;width:${hBarW}%;background:${COLORS[i%COLORS.length]};border-radius:2px;opacity:0.7"></div>
+            </div>
+            <span style="font-size:0.6rem;color:var(--muted)">${sw}%</span>
+            <span style="font-size:0.62rem;color:${hPlClr}">${pct(h.pnl_pct)}</span>
+          </div>
         </div>
+      </div>`;
+    }).join('');
+
+    return `
+    <div id="${uid}_wrap">
+      <div style="display:flex;align-items:center;gap:10px;padding:8px 4px;border-bottom:1px solid var(--border);cursor:pointer;user-select:none"
+           onclick="(function(){const el=document.getElementById('${uid}_stocks');const ar=document.getElementById('${uid}_ar');const open=el.style.display!=='none';el.style.display=open?'none':'block';ar.style.transform=open?'rotate(0deg)':'rotate(90deg)';if(!open){const ctr=document.getElementById('pieCenterName');if(ctr)ctr.textContent='${name}';const pl=document.getElementById('pieCenterPL');if(pl)pl.innerHTML='<span style=\"color:${v.pl>=0?'var(--gain)':'var(--loss)'}\" class=\"blur-val\">${v.pl>=0?'+':''}${fmtL(v.pl)}</span>';const pc=document.getElementById('pieCenterPct');if(pc)pc.textContent='${weight}% of portfolio';}}).call(this)"
+           onmouseover="this.style.background='var(--s3)'" onmouseout="this.style.background=''">
+        <div style="width:10px;height:10px;border-radius:2px;background:${COLORS[i%COLORS.length]};flex-shrink:0"></div>
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+            <span style="font-size:0.76rem;font-weight:600">${name}</span>
+            <span style="font-size:0.62rem;color:var(--muted)">${v.stocks.length} stock${v.stocks.length>1?'s':''}</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <div style="flex:1;height:4px;background:var(--s3);border-radius:2px;overflow:hidden">
+              <div style="height:100%;width:${barW}%;background:${COLORS[i%COLORS.length]};border-radius:2px"></div>
+            </div>
+            <span style="font-size:0.68rem;font-weight:600;color:${plClr};min-width:50px;text-align:right" class="blur-val">${v.pl>=0?'+':''}${fmtL(v.pl)}</span>
+            <span style="font-size:0.65rem;color:var(--muted);min-width:36px;text-align:right">${weight}%</span>
+          </div>
+        </div>
+        <span id="${uid}_ar" style="font-size:0.7rem;color:var(--muted);transition:transform 0.2s">›</span>
       </div>
-      <span style="font-size:0.7rem;color:var(--muted)">›</span>
+      <div id="${uid}_stocks" style="display:none;background:var(--s2);border-bottom:1px solid var(--border)">
+        ${stocksHtml}
+      </div>
     </div>`;
   }).join('');
 
