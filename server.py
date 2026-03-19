@@ -125,56 +125,224 @@ def cached(key, fn, ttl=CACHE_TTL):
 
 
 # ─────────────────────────────────────────────────────────
+import os as _os
+
+# ─────────────────────────────────────────────────────────
+# DATA DIRECTORY — all persistent data saved here
+# OneDrive/Documents so data is automatically backed up
+# ─────────────────────────────────────────────────────────
+DATA_DIR = r"C:\Users\Rubez\Documents\Folio dashboard"
+_os.makedirs(DATA_DIR, exist_ok=True)
+HISTORY_FILE = _os.path.join(DATA_DIR, "portfolio_history.json")
+
 # PORTFOLIO HISTORY — auto-saves daily snapshots
 # ─────────────────────────────────────────────────────────
 
 # ─────────────────────────────────────────────────────────
-# FREE CLOUD STORAGE via JSONBin.io
+# ENCRYPTED GOOGLE DRIVE STORAGE
+# Credentials: C:\Users\Rubez\Documents\Folio dashboard\mystic-song-442807-c6-56164cfe14d8.json
+# Drive Folder: 1rc55cYjZUYJJ8QBHvg13RaYjLVIbhXBu
+# Encryption: AES-256 via cryptography library
 # ─────────────────────────────────────────────────────────
-# 1. Go to jsonbin.io → sign up free
-# 2. Create a bin with content: {}
-# 3. Copy the Bin ID and your API key
-# 4. Set as environment variables in Render:
-#    JSONBIN_BIN_ID   = your bin id  (e.g. 64a1b2c3d4e5f6...)
-#    JSONBIN_API_KEY  = your api key (e.g. $2b$10$...)
-# ─────────────────────────────────────────────────────────
+
+GDRIVE_CREDENTIALS = _os.path.join(DATA_DIR, "mystic-song-442807-c6-56164cfe14d8.json")
+GDRIVE_FOLDER_ID   = "1rc55cYjZUYJJ8QBHvg13RaYjLVIbhXBu"
+GDRIVE_FILENAME    = "folio_data.enc"   # encrypted file name in Drive
+ENCRYPTION_KEY_ENV = os.getenv("FOLIO_KEY", "")  # set via .env or env var
+
+# ── Encryption helpers ──────────────────────────────────
+def _get_key():
+    """Derive a 32-byte AES key from the user's passphrase."""
+    import hashlib
+    pw = ENCRYPTION_KEY_ENV or "folio-default-key-change-me"
+    return hashlib.sha256(pw.encode()).digest()
+
+def _encrypt(data: dict) -> bytes:
+    """Encrypt dict → bytes using AES-256 GCM."""
+    try:
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+        import secrets
+        key   = _get_key()
+        nonce = secrets.token_bytes(12)
+        ct    = AESGCM(key).encrypt(nonce, json.dumps(data).encode(), None)
+        return nonce + ct  # prepend nonce for decryption
+    except ImportError:
+        # cryptography not installed — fall back to plain JSON (warn user)
+        print("⚠️  WARNING: 'cryptography' package not installed — data saved unencrypted.")
+        print("   Run: pip install cryptography")
+        return json.dumps(data).encode()
+
+def _decrypt(raw: bytes) -> dict:
+    """Decrypt bytes → dict."""
+    try:
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+        key   = _get_key()
+        nonce = raw[:12]
+        ct    = raw[12:]
+        return json.loads(AESGCM(key).decrypt(nonce, ct, None).decode())
+    except ImportError:
+        # No cryptography — try plain JSON
+        return json.loads(raw.decode())
+    except Exception as e:
+        print(f"Decryption failed: {e}")
+        return {}
+
+# ── Google Drive helpers ─────────────────────────────────
+_gdrive_service  = None
+_gdrive_file_id  = None   # ID of the encrypted file in Drive
+
+def _get_drive_service():
+    """Return authenticated Drive service (cached)."""
+    global _gdrive_service
+    if _gdrive_service:
+        return _gdrive_service
+    try:
+        from google.oauth2 import service_account
+        from googleapiclient.discovery import build
+        creds = service_account.Credentials.from_service_account_file(
+            GDRIVE_CREDENTIALS,
+            scopes=["https://www.googleapis.com/auth/drive"]
+        )
+        _gdrive_service = build("drive", "v3", credentials=creds)
+        return _gdrive_service
+    except Exception as e:
+        print(f"Google Drive auth failed: {e}")
+        print("Falling back to local file storage.")
+        return None
+
+def _find_drive_file():
+    """Find the encrypted data file in Drive folder. Returns file ID or None."""
+    global _gdrive_file_id
+    if _gdrive_file_id:
+        return _gdrive_file_id
+    try:
+        svc = _get_drive_service()
+        if not svc: return None
+        res = svc.files().list(
+            q=f"name='{GDRIVE_FILENAME}' and '{GDRIVE_FOLDER_ID}' in parents and trashed=false",
+            fields="files(id,name)"
+        ).execute()
+        files = res.get("files", [])
+        if files:
+            _gdrive_file_id = files[0]["id"]
+            return _gdrive_file_id
+    except Exception as e:
+        print(f"Drive file search error: {e}")
+    return None
+
+def _drive_download() -> bytes:
+    """Download encrypted file bytes from Drive."""
+    try:
+        from googleapiclient.http import MediaIoBaseDownload
+        import io
+        svc     = _get_drive_service()
+        file_id = _find_drive_file()
+        if not svc or not file_id: return None
+        req    = svc.files().get_media(fileId=file_id)
+        buf    = io.BytesIO()
+        dl     = MediaIoBaseDownload(buf, req)
+        done   = False
+        while not done:
+            _, done = dl.next_chunk()
+        return buf.getvalue()
+    except Exception as e:
+        print(f"Drive download error: {e}")
+        return None
+
+def _drive_upload(data: bytes):
+    """Upload encrypted bytes to Drive (create or update)."""
+    global _gdrive_file_id
+    try:
+        from googleapiclient.http import MediaIoBaseUpload
+        import io
+        svc     = _get_drive_service()
+        if not svc: return False
+        file_id = _find_drive_file()
+        media   = MediaIoBaseUpload(io.BytesIO(data), mimetype="application/octet-stream")
+        if file_id:
+            svc.files().update(fileId=file_id, media_body=media).execute()
+        else:
+            meta = {"name": GDRIVE_FILENAME, "parents": [GDRIVE_FOLDER_ID]}
+            f    = svc.files().create(body=meta, media_body=media, fields="id").execute()
+            _gdrive_file_id = f["id"]
+        return True
+    except Exception as e:
+        print(f"Drive upload error: {e}")
+        return False
+
+# ── Main load/save ───────────────────────────────────────
+def load_history():
+    """Load history: try Drive first, fall back to local file."""
+    # Try Google Drive
+    try:
+        raw = _drive_download()
+        if raw:
+            data = _decrypt(raw)
+            if data:
+                print("✅ Loaded data from Google Drive (encrypted)")
+                return data
+    except Exception as e:
+        print(f"Drive load error: {e}")
+
+    # Fall back to local file
+    try:
+        if _os.path.exists(HISTORY_FILE):
+            with open(HISTORY_FILE) as f:
+                data = json.load(f)
+            print(f"✅ Loaded data from local file: {HISTORY_FILE}")
+            # Auto-migrate: upload existing local data to Drive on first load
+            try:
+                if _drive_upload(_encrypt(data)):
+                    print("✅ Migrated local data to Google Drive (encrypted)")
+            except: pass
+            return data
+    except Exception as e:
+        print(f"Local file load error: {e}")
+
+    return {}
+
+# ── Cached history for this request ─────────────────────
+_history_cache      = None
+_history_cache_time = 0
+
+def _get_history():
+    """Cache history in memory for 30s to avoid repeated Drive downloads."""
+    global _history_cache, _history_cache_time
+    import time
+    now = time.time()
+    if _history_cache is not None and now - _history_cache_time < 30:
+        return _history_cache
+    _history_cache      = _get_history()
+    _history_cache_time = now
+    return _history_cache
+
+def _save_history(history: dict):
+    """Save history to Drive (encrypted) AND local file (backup)."""
+    global _history_cache, _history_cache_time
+    import time
+    _history_cache      = history
+    _history_cache_time = time.time()
+    # Save to Drive (encrypted)
+    try:
+        _drive_upload(_encrypt(history))
+    except Exception as e:
+        print(f"Drive save error: {e}")
+    # Always save local backup too (plain JSON — your own machine)
+    try:
+        with open(HISTORY_FILE, "w", encoding="utf-8") as f:
+            json.dump(history, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        print(f"Local backup save error: {e}")
 
 import urllib.request, urllib.error
-
-JSONBIN_BIN_ID  = os.getenv("JSONBIN_BIN_ID",  "")
-JSONBIN_API_KEY = os.getenv("JSONBIN_API_KEY",  "")
-JSONBIN_BASE    = f"https://api.jsonbin.io/v3/b/{JSONBIN_BIN_ID}"
-
-def load_history():
-    """Load portfolio history from JSONBin cloud storage."""
-    if not JSONBIN_BIN_ID or not JSONBIN_API_KEY:
-        # Fallback to local file if keys not set
-        try:
-            if os.path.exists("portfolio_history.json"):
-                with open("portfolio_history.json") as f:
-                    return json.load(f)
-        except: pass
-        return {}
-    try:
-        req = urllib.request.Request(
-            JSONBIN_BASE + "/latest",
-            headers={"X-Master-Key": JSONBIN_API_KEY, "X-Bin-Meta": "false"}
-        )
-        with urllib.request.urlopen(req, timeout=5) as r:
-            return json.loads(r.read().decode())
-    except Exception as e:
-        print(f"JSONBin load error: {e}")
-        return {}
 
 def save_snapshot(total_value, total_cost, cash, day_pl=0):
     """Save/update today's snapshot and track peak capital for drawdown calculation."""
     try:
         today         = date.today().isoformat()
-        history       = load_history()
+        history       = _get_history()
         current_cap   = round(total_value + cash, 2)
 
-        # Peak capital = highest total capital ever recorded across all history
-        # Update it whenever current capital is higher
         stored_peak   = history.get("__peak_capital__", 0)
         peak_capital  = max(stored_peak, current_cap)
         history["__peak_capital__"] = peak_capital
@@ -197,29 +365,17 @@ def save_snapshot(total_value, total_cost, cash, day_pl=0):
                 "day_pl":        round(day_pl, 2),
             }
             action = "created"
-
-        if JSONBIN_BIN_ID and JSONBIN_API_KEY:
-            data = json.dumps(history).encode()
-            req  = urllib.request.Request(
-                JSONBIN_BASE, data=data, method="PUT",
-                headers={"Content-Type": "application/json", "X-Master-Key": JSONBIN_API_KEY}
-            )
-            urllib.request.urlopen(req, timeout=5)
-            print(f"Snapshot {action} for {today} | capital={current_cap} peak={peak_capital} day_pl={day_pl:.2f} → JSONBin")
-        else:
-            with open("portfolio_history.json", "w") as f:
-                json.dump(history, f, indent=2)
-            print(f"Snapshot {action} for {today} | capital={current_cap} peak={peak_capital} day_pl={day_pl:.2f} → portfolio_history.json")
+        _save_history(history)
+        print(f"Snapshot {action} for {today} | capital={current_cap} peak={peak_capital} day_pl={day_pl:.2f} → Drive+Local")
     except Exception as e:
         print(f"Could not save snapshot: {e}")
 
 def get_peak_capital():
     """Return the highest total capital ever recorded."""
-    history = load_history()
-    return history.get("__peak_capital__", 0)
+    return _get_history().get("__peak_capital__", 0)
 
 
-    history = load_history()
+    history = _get_history()
     entries = []
     for k, v in history.items():
         # Only include real date entries (YYYY-MM-DD format, containing a 'date' field)
@@ -549,7 +705,7 @@ def api_debug():
         "kite_available":   KITE_AVAILABLE,
         "connected":        bool(session.get("access_token")),
         "user":             session.get("user_name"),
-        "jsonbin_set":      bool(JSONBIN_BIN_ID and JSONBIN_API_KEY),
+        "gdrive_enabled":   bool(_get_drive_service() is not None),
         "cache_keys":       list(session.get("cache", {}).keys()),
     }
     if session.get("access_token") and KITE_AVAILABLE:
@@ -588,25 +744,14 @@ def api_history():
 STOCK_RISK_KEY = "__stock_risks__"
 
 def load_stock_risks():
-    history = load_history()
+    history = _get_history()
     return history.get(STOCK_RISK_KEY, {})
 
 def save_stock_risks(risks):
     try:
-        history = load_history()
+        history = _get_history()
         history[STOCK_RISK_KEY] = risks
-        if JSONBIN_BIN_ID and JSONBIN_API_KEY:
-            data = json.dumps(history).encode()
-            req  = urllib.request.Request(
-                JSONBIN_BASE,
-                data=data,
-                method="PUT",
-                headers={"Content-Type": "application/json", "X-Master-Key": JSONBIN_API_KEY}
-            )
-            urllib.request.urlopen(req, timeout=5)
-        else:
-            with open("portfolio_history.json", "w") as f:
-                json.dump(history, f, indent=2)
+        _save_history(history)
     except Exception as e:
         print(f"Could not save stock risks: {e}")
 
@@ -673,7 +818,7 @@ def api_stream():
 def get_journal():
     """Get journal entries from JSONBin or local file."""
     try:
-        history = load_history()
+        history = _get_history()
         return jsonify(history.get("__journal__", {}))
     except Exception as e:
         return jsonify({}), 200
@@ -683,18 +828,9 @@ def save_journal():
     """Save journal entries."""
     try:
         journal_data = request.get_json()
-        history = load_history()
+        history = _get_history()
         history["__journal__"] = journal_data
-        if JSONBIN_BIN_ID and JSONBIN_API_KEY:
-            data = json.dumps(history).encode()
-            req  = urllib.request.Request(
-                JSONBIN_BASE, data=data, method="PUT",
-                headers={"Content-Type": "application/json", "X-Master-Key": JSONBIN_API_KEY}
-            )
-            urllib.request.urlopen(req, timeout=5)
-        else:
-            with open("portfolio_history.json", "w") as f:
-                json.dump(history, f, indent=2)
+        _save_history(history)
         return jsonify({"ok": True})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -706,7 +842,7 @@ def save_journal():
 
 import os as _os
 
-IMAGES_DIR = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "journal_images")
+IMAGES_DIR = _os.path.join(DATA_DIR, "journal_images")
 
 def ensure_date_dir(date_str):
     d = _os.path.join(IMAGES_DIR, date_str)
