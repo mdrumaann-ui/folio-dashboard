@@ -1313,7 +1313,6 @@ tbody tr:last-child td{border-bottom:none;}
           <div id="pieExpandedTitle" style="padding:8px 12px;font-size:0.65rem;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;border-bottom:1px solid var(--border)"></div>
           <div id="pieExpandedStocks"></div>
         </div>
-        <div id="sectorLegend" style="margin-top:12px;display:flex;flex-direction:column;gap:3px"></div>
       </div>
       <!-- SECTOR ROWS + SUMMARY -->
       <div>
@@ -1929,36 +1928,61 @@ function setChartTab(el,mode){document.querySelectorAll('.ctab').forEach(b=>b.cl
 // ── PORTFOLIO ANALYTICS ────────────────────────────────
 function renderHoldingsAnalytics(d){
   const holdings=d.holdings;
-  const totalInvested=holdings.reduce((s,h)=>s+h.invested_value,0);
-  const winners=holdings.filter(h=>h.pnl>0),losers=holdings.filter(h=>h.pnl<0),neutral=holdings.filter(h=>h.pnl===0);
-  const best=[...holdings].sort((a,b)=>b.pnl_pct-a.pnl_pct)[0];
-  const worst=[...holdings].sort((a,b)=>a.pnl_pct-b.pnl_pct)[0];
-  const biggestPos=[...holdings].sort((a,b)=>b.invested_value-a.invested_value)[0];
-  const avgReturn=holdings.reduce((s,h)=>s+h.pnl_pct,0)/holdings.length;
-  const total=holdings.length;
-  const winRate=total>0?winners.length/total*100:0;
-  const lossRate=total>0?losers.length/total*100:0;
-  const winLossRatio=losers.length>0?(winners.length/losers.length).toFixed(2):'∞';
-  const grossProfit=winners.reduce((s,h)=>s+h.pnl,0);
-  const grossLoss=Math.abs(losers.reduce((s,h)=>s+h.pnl,0));
-  const profitFactor=grossLoss>0?grossProfit/grossLoss:grossProfit>0?999:0;
+  const ts=d.trade_stats;  // realised P&L from kite.trades (closed positions)
+
+  // ── UNREALISED (current open holdings) ──
+  const winners=holdings.filter(h=>h.pnl>0);
+  const losers=holdings.filter(h=>h.pnl<0);
+  const unrealisedProfit=winners.reduce((s,h)=>s+h.pnl,0);
+  const unrealisedLoss=Math.abs(losers.reduce((s,h)=>s+h.pnl,0));
+
+  // ── REALISED (from closed trades via kite.trades FIFO) ──
+  const realisedProfit = ts?.win_amt  || 0;
+  const realisedLoss   = ts?.loss_amt || 0;
+  const realisedWins   = ts?.wins     || 0;
+  const realisedLosses = ts?.losses   || 0;
+
+  // ── COMBINED ──
+  const grossProfit = unrealisedProfit + realisedProfit;
+  const grossLoss   = unrealisedLoss   + realisedLoss;
+  const totalWins   = winners.length   + realisedWins;
+  const totalLosses = losers.length    + realisedLosses;
+  const totalTrades = totalWins + totalLosses;
+  const winRate     = totalTrades>0 ? totalWins/totalTrades*100 : 0;
+  const lossRate    = totalTrades>0 ? totalLosses/totalTrades*100 : 0;
+  const winLossRatio= totalLosses>0?(totalWins/totalLosses).toFixed(2):'∞';
+  const profitFactor= grossLoss>0?grossProfit/grossLoss:grossProfit>0?999:0;
   const pfVal=profitFactor>=999?'∞':profitFactor.toFixed(2);
   const pfColor=profitFactor>=2?'var(--gain)':profitFactor>=1?'var(--warn)':'var(--loss)';
   const pfLabel=profitFactor>=2?'EXCELLENT':profitFactor>=1.5?'GOOD':profitFactor>=1?'MARGINAL':'LOSING';
-  // Avg win/loss amounts and %
-  const avgWinAmt=winners.length>0?grossProfit/winners.length:0;
-  const avgLossAmt=losers.length>0?grossLoss/losers.length:0;
-  const avgWinPct=winners.length>0?winners.reduce((s,h)=>s+h.pnl_pct,0)/winners.length:0;
-  const avgLossPct=losers.length>0?Math.abs(losers.reduce((s,h)=>s+h.pnl_pct,0)/losers.length):0;
+
+  // Avg win/loss
+  const avgWinAmt  = totalWins>0   ? grossProfit/totalWins   : 0;
+  const avgLossAmt = totalLosses>0 ? grossLoss/totalLosses   : 0;
+  const avgWinPct  = winners.length>0 ? winners.reduce((s,h)=>s+h.pnl_pct,0)/winners.length : 0;
+  const avgLossPct = losers.length>0  ? Math.abs(losers.reduce((s,h)=>s+h.pnl_pct,0)/losers.length) : 0;
   const rr=avgLossAmt>0?(avgWinAmt/avgLossAmt).toFixed(2):'∞';
 
+  const totalInvested=holdings.reduce((s,h)=>s+h.invested_value,0);
+  const best=[...holdings].sort((a,b)=>b.pnl_pct-a.pnl_pct)[0];
+  const worst=[...holdings].sort((a,b)=>a.pnl_pct-b.pnl_pct)[0];
+  const biggestPos=[...holdings].sort((a,b)=>b.invested_value-a.invested_value)[0];
+  const avgReturn=holdings.length>0?holdings.reduce((s,h)=>s+h.pnl_pct,0)/holdings.length:0;
+  const total=holdings.length;
+  const hasRealised = realisedWins+realisedLosses > 0;
+
   document.getElementById('holdingsAnalytics').innerHTML=`
+    ${hasRealised?`<div style="padding:6px 10px;background:var(--gain-bg);border-radius:5px;border-left:3px solid var(--gain);font-size:0.7rem;color:var(--gain);margin-bottom:10px">
+      ✅ Showing <strong>combined</strong> data: ${total} open positions + ${realisedWins+realisedLosses} closed trades from tradebook
+    </div>`:`<div style="padding:6px 10px;background:var(--s3);border-radius:5px;border-left:3px solid var(--muted);font-size:0.7rem;color:var(--muted);margin-bottom:10px">
+      ℹ️ Showing open positions only — no closed trades found in today's tradebook
+    </div>`}
     <div class="grid2" style="margin-bottom:12px">
       <!-- WIN RATE -->
       <div class="big-metric">
         <div style="font-size:0.6rem;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:var(--muted);margin-bottom:8px">Win Rate</div>
         <div class="big-metric-num" style="color:${winRate>=50?'var(--gain)':'var(--loss)'}">${winRate.toFixed(0)}%</div>
-        <div class="big-metric-lbl">${winners.length} wins · ${losers.length} losses · ${total} stocks</div>
+        <div class="big-metric-lbl">${totalWins} wins · ${totalLosses} losses · ${totalTrades} total${hasRealised?' (open+closed)':''}</div>
         <div style="display:flex;height:5px;border-radius:3px;overflow:hidden;margin:10px 0 8px">
           <div style="width:${winRate}%;background:var(--gain);transition:width 0.8s ease"></div>
           <div style="width:${lossRate}%;background:var(--loss);transition:width 0.8s ease"></div>
@@ -2220,6 +2244,8 @@ function renderSectors(d){
     },
     options:{
       responsive:true, maintainAspectRatio:true, cutout:'58%',
+      // No hover effects — click only interaction
+      hover:{mode:null},
       onClick:(_,els)=>{
         if(els.length){
           const idx=els[0].index;
@@ -2228,20 +2254,7 @@ function renderSectors(d){
       },
       plugins:{
         legend:{display:false},
-        tooltip:{
-          backgroundColor:isDark?'#1a1d27':'#fff',
-          borderColor:isDark?'#2e3248':'#dde1f0',borderWidth:1,
-          titleColor:isDark?'#7b82a8':'#9090a0',
-          bodyColor:isDark?'#e8eaf6':'#1a1d2e',
-          callbacks:{
-            title:ctx=>ctx[0].label,
-            label:ctx=>{
-              const s=sectors[ctx.dataIndex][1];
-              const p=(s.value/totalVal*100).toFixed(1);
-              return [` ${p}% · ${s.stocks.length} stocks`,` P&L: ${s.pl>=0?'+':''}${fmtL(s.pl)}`];
-            }
-          }
-        }
+        tooltip:{enabled:false},  // No hover tooltip — details shown on click in expanded panel
       }
     }
   });
@@ -2256,19 +2269,6 @@ function renderSectors(d){
   };
 
   // LEGEND
-  const legEl = document.getElementById('sectorLegend');
-  if(legEl) legEl.innerHTML = sectors.map(([name,v],i)=>`
-    <div style="display:flex;align-items:center;gap:6px;cursor:pointer;padding:3px 4px;border-radius:4px"
-         onmouseover="this.style.background='var(--s3)'" onmouseout="this.style.background=''"
-         onclick="expandPieSlice('${name}',null,'${COLORS[i%COLORS.length]}',${totalVal})">
-      <div style="width:8px;height:8px;border-radius:2px;background:${COLORS[i%COLORS.length]};flex-shrink:0"></div>
-      <span style="font-size:0.68rem;flex:1;font-weight:500">${name}</span>
-      <span style="font-size:0.65rem;font-family:'DM Mono',monospace;color:${v.pl>=0?'var(--gain)':'var(--loss)'}" class="blur-val">
-        ${v.pl>=0?'+':''}${fmtL(v.pl)}
-      </span>
-      <span style="font-size:0.6rem;color:var(--muted);width:28px;text-align:right">${(v.value/totalVal*100).toFixed(0)}%</span>
-    </div>`).join('');
-
   // SECTOR ROWS
   document.getElementById('sectorRows').innerHTML = sectors.map(([name,v],i)=>{
     const dispVal = view==='pl'?v.pl:view==='invested'?v.invested:v.value;
@@ -2289,7 +2289,7 @@ function renderSectors(d){
 
     return `<div style="border-bottom:1px solid var(--border)">
       <div style="display:flex;align-items:center;gap:10px;padding:9px 0 5px;cursor:pointer"
-           onclick="const el=document.getElementById('${uid}');const ar=document.getElementById('${uid}a');el.style.display=el.style.display==='none'?'block':'none';ar.textContent=el.style.display==='none'?'▸':'▾'">
+           onclick="const el=document.getElementById('${uid}');const ar=document.getElementById('${uid}a');el.style.display=el.style.display==='none'?'block':'none';ar.textContent=el.style.display==='none'?'▸':'▾';expandPieSlice('${name}',null,'${COLORS[i%COLORS.length]}',${totalVal})">
         <div style="width:10px;height:10px;border-radius:2px;background:${COLORS[i%COLORS.length]};flex-shrink:0"></div>
         <div style="flex:1;min-width:0">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px">
