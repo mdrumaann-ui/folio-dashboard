@@ -1296,13 +1296,26 @@ tbody tr:last-child td{border-bottom:none;}
         </label>
       </div>
     </div>
-    <div style="display:grid;grid-template-columns:280px 1fr;gap:20px;align-items:start">
-      <!-- PIE CHART -->
-      <div>
-        <canvas id="sectorChart" width="280" height="280"></canvas>
-        <div id="sectorLegend" style="margin-top:10px;display:flex;flex-direction:column;gap:4px"></div>
+    <div style="display:grid;grid-template-columns:320px 1fr;gap:20px;align-items:start">
+      <!-- PIE CHART — click slice to expand and show stocks inside -->
+      <div style="position:relative">
+        <div style="position:relative;width:300px;height:300px;margin:0 auto">
+          <canvas id="sectorChart" width="300" height="300"></canvas>
+          <!-- Center label — shows sector name + P&L when a slice is clicked -->
+          <div id="pieCenter" style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none;padding:30px;text-align:center">
+            <div id="pieCenterName" style="font-size:0.7rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px">Click a slice</div>
+            <div id="pieCenterPL" style="font-size:1rem;font-weight:700;margin-top:3px"></div>
+            <div id="pieCenterPct" style="font-size:0.65rem;color:var(--muted);margin-top:1px"></div>
+          </div>
+        </div>
+        <!-- Expanded stock list — appears below pie when slice clicked -->
+        <div id="pieExpanded" style="display:none;margin-top:12px;background:var(--s2);border-radius:8px;border:1px solid var(--border);overflow:hidden">
+          <div id="pieExpandedTitle" style="padding:8px 12px;font-size:0.65rem;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;border-bottom:1px solid var(--border)"></div>
+          <div id="pieExpandedStocks"></div>
+        </div>
+        <div id="sectorLegend" style="margin-top:12px;display:flex;flex-direction:column;gap:3px"></div>
       </div>
-      <!-- SECTOR LIST + DETAIL -->
+      <!-- SECTOR ROWS + SUMMARY -->
       <div>
         <div id="sectorRows" style="margin-bottom:12px"></div>
         <div id="sectorDetails" style="display:none;background:var(--s2);border-radius:8px;padding:14px;border:1px solid var(--border);margin-bottom:12px"></div>
@@ -2156,7 +2169,13 @@ function calNavYear(dir){
 }
 
 // ── SECTORS — horizontal stacked bar like reference ────
-const COLORS=['#5b6cf9','#00bcd4','#ab47bc','#5c6bc0','#26c6da','#00897b','#f06292','#26a69a','#7e57c2','#42a5f5'];
+const COLORS=[
+  '#5b6cf9','#00bcd4','#ab47bc','#00897b','#f06292',
+  '#ff7043','#42a5f5','#26a69a','#7e57c2','#d4e157',
+  '#26c6da','#ec407a','#66bb6a','#ffa726','#5c6bc0',
+  '#29b6f6','#ef5350','#9ccc65','#8d6e63','#78909c',
+  '#ffca28','#26a69a','#e040fb','#00e5ff','#ff6e40'
+];
 
 function renderSectors(d){
   if(!d) return;
@@ -2191,11 +2210,11 @@ function renderSectors(d){
         data: sectors.map(([,v])=>v.value),
         backgroundColor: COLORS.slice(0, sectors.length),
         borderColor: isDark?'#0f1117':'#f4f6fb',
-        borderWidth: 2, hoverOffset: 10,
+        borderWidth: 2, hoverOffset: 12,
       }]
     },
     options:{
-      responsive:true, maintainAspectRatio:true, cutout:'55%',
+      responsive:true, maintainAspectRatio:true, cutout:'58%',
       plugins:{
         legend:{display:false},
         tooltip:{
@@ -2208,13 +2227,16 @@ function renderSectors(d){
             label:ctx=>{
               const s=sectors[ctx.dataIndex][1];
               const p=(s.value/totalVal*100).toFixed(1);
-              return [` Value: ${fmtL(s.value)} (${p}%)`,` P&L: ${s.pl>=0?'+':''}${fmtL(s.pl)} · ${s.stocks.length} stocks`];
+              return [` ${p}% of portfolio · ${s.stocks.length} stocks`,` P&L: ${s.pl>=0?'+':''}${fmtL(s.pl)}`];
             }
           }
         }
       },
       onClick:(_,els)=>{
-        if(els.length) showSectorDetail(sectors[els[0].index][0],sectors[els[0].index][1],COLORS[els[0].index%COLORS.length],totalVal);
+        if(els.length){
+          const idx=els[0].index;
+          expandPieSlice(sectors[idx][0],sectors[idx][1],COLORS[idx%COLORS.length],totalVal);
+        }
       }
     }
   });
@@ -2224,7 +2246,7 @@ function renderSectors(d){
   if(legEl) legEl.innerHTML = sectors.map(([name,v],i)=>`
     <div style="display:flex;align-items:center;gap:6px;cursor:pointer;padding:3px 4px;border-radius:4px"
          onmouseover="this.style.background='var(--s3)'" onmouseout="this.style.background=''"
-         onclick="showSectorDetail('${name}',null,'${COLORS[i%COLORS.length]}',${totalVal})">
+         onclick="expandPieSlice('${name}',null,'${COLORS[i%COLORS.length]}',${totalVal})">
       <div style="width:8px;height:8px;border-radius:2px;background:${COLORS[i%COLORS.length]};flex-shrink:0"></div>
       <span style="font-size:0.68rem;flex:1;font-weight:500">${name}</span>
       <span style="font-size:0.65rem;font-family:'DM Mono',monospace;color:${v.pl>=0?'var(--gain)':'var(--loss)'}" class="blur-val">
@@ -2305,6 +2327,56 @@ function renderSectors(d){
 
   window._sectorData  = Object.fromEntries(sectors);
   window._sectorTotal = totalVal;
+}
+
+function expandPieSlice(name, data, color, totalVal){
+  const s = data || window._sectorData?.[name];
+  if(!s) return;
+
+  // Update center label
+  const pct = (s.value / totalVal * 100).toFixed(1);
+  const plColor = s.pl>=0 ? 'var(--gain)' : 'var(--loss)';
+  document.getElementById('pieCenterName').textContent = name;
+  document.getElementById('pieCenterPL').innerHTML = `<span style="color:${plColor}">${s.pl>=0?'+':''}${fmtL(s.pl)}</span>`;
+  document.getElementById('pieCenterPct').textContent = `${pct}% of portfolio`;
+
+  // Show expanded stock list below pie
+  const expanded = document.getElementById('pieExpanded');
+  const title    = document.getElementById('pieExpandedTitle');
+  const stocksEl = document.getElementById('pieExpandedStocks');
+
+  title.style.color = color;
+  title.innerHTML = `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${color};margin-right:6px"></span>${name} — ${s.stocks.length} stock${s.stocks.length>1?'s':''}`;
+
+  // Sort by current value descending
+  const sorted = [...s.stocks].sort((a,b)=>b.current_value-a.current_value);
+  const totalSectorVal = sorted.reduce((sum,h)=>sum+h.current_value,0);
+
+  stocksEl.innerHTML = sorted.map(h=>{
+    const weight = (h.current_value / totalSectorVal * 100).toFixed(1);
+    const plColor = h.pnl>=0 ? 'var(--gain)' : 'var(--loss)';
+    const barW = Math.min(parseFloat(weight), 100);
+    return `
+      <div style="padding:8px 12px;border-bottom:1px solid var(--border);cursor:pointer"
+           onclick="window.open('https://www.tradingview.com/chart/?symbol=${h.exchange||'NSE'}%3A${h.tradingsymbol}','_blank')"
+           onmouseover="this.style.background='var(--s3)'" onmouseout="this.style.background=''">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+          <span style="font-size:0.75rem;font-weight:700">${h.tradingsymbol}</span>
+          <span style="font-size:0.72rem;font-weight:600;color:${plColor}" class="blur-val">${h.pnl>=0?'+':''}${fmtL(h.pnl)}</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+          <span style="font-size:0.62rem;color:var(--muted)">${weight}% of sector</span>
+          <span style="font-size:0.65rem;color:${plColor}">${pct(h.pnl_pct)}</span>
+        </div>
+        <div style="height:3px;background:var(--s3);border-radius:2px;overflow:hidden">
+          <div style="height:100%;width:${barW}%;background:${color};border-radius:2px;opacity:0.7"></div>
+        </div>
+      </div>`;
+  }).join('');
+
+  expanded.style.display = 'block';
+  // Also show detail panel on the right side
+  showSectorDetail(name, data, color, totalVal);
 }
 
 function showSectorDetail(name, data, color, totalVal){
