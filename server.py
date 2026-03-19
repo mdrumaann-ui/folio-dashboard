@@ -1596,6 +1596,11 @@ function toggleBlur(){
   const btn=document.getElementById('blurBtn');
   if(btn){btn.textContent=blurActive?'👁 Show ₹':'👁 Hide ₹';btn.style.borderColor=blurActive?'var(--warn)':'';btn.style.color=blurActive?'var(--warn)':'';}
   rewireBlurPeek();
+  // Also rewire any visible pie expanded panel
+  const exp=document.getElementById('pieExpanded');
+  if(exp&&exp.style.display!=='none') rewireBlurPeek(exp);
+  const ctr=document.getElementById('pieCenter');
+  if(ctr) rewireBlurPeek(ctr);
 }
 
 // ── NAV ────────────────────────────────────────────────
@@ -2210,11 +2215,17 @@ function renderSectors(d){
         data: sectors.map(([,v])=>v.value),
         backgroundColor: COLORS.slice(0, sectors.length),
         borderColor: isDark?'#0f1117':'#f4f6fb',
-        borderWidth: 2, hoverOffset: 12,
+        borderWidth: 2, hoverOffset: 14,
       }]
     },
     options:{
       responsive:true, maintainAspectRatio:true, cutout:'58%',
+      onClick:(_,els)=>{
+        if(els.length){
+          const idx=els[0].index;
+          expandPieSlice(sectors[idx][0],sectors[idx][1],COLORS[idx%COLORS.length],totalVal);
+        }
+      },
       plugins:{
         legend:{display:false},
         tooltip:{
@@ -2227,19 +2238,22 @@ function renderSectors(d){
             label:ctx=>{
               const s=sectors[ctx.dataIndex][1];
               const p=(s.value/totalVal*100).toFixed(1);
-              return [` ${p}% of portfolio · ${s.stocks.length} stocks`,` P&L: ${s.pl>=0?'+':''}${fmtL(s.pl)}`];
+              return [` ${p}% · ${s.stocks.length} stocks`,` P&L: ${s.pl>=0?'+':''}${fmtL(s.pl)}`];
             }
           }
-        }
-      },
-      onClick:(_,els)=>{
-        if(els.length){
-          const idx=els[0].index;
-          expandPieSlice(sectors[idx][0],sectors[idx][1],COLORS[idx%COLORS.length],totalVal);
         }
       }
     }
   });
+  // Backup native click — works even if Chart.js onClick misses
+  const cvs = document.getElementById('sectorChart');
+  cvs.onclick = function(e){
+    const pts = sectorChart.getElementsAtEventForMode(e,'nearest',{intersect:true},false);
+    if(pts.length){
+      const idx=pts[0].index;
+      expandPieSlice(sectors[idx][0],sectors[idx][1],COLORS[idx%COLORS.length],totalVal);
+    }
+  };
 
   // LEGEND
   const legEl = document.getElementById('sectorLegend');
@@ -2334,11 +2348,11 @@ function expandPieSlice(name, data, color, totalVal){
   if(!s) return;
 
   // Update center label
-  const pct = (s.value / totalVal * 100).toFixed(1);
+  const sPct = (s.value / totalVal * 100).toFixed(1);
   const plColor = s.pl>=0 ? 'var(--gain)' : 'var(--loss)';
   document.getElementById('pieCenterName').textContent = name;
-  document.getElementById('pieCenterPL').innerHTML = `<span style="color:${plColor}">${s.pl>=0?'+':''}${fmtL(s.pl)}</span>`;
-  document.getElementById('pieCenterPct').textContent = `${pct}% of portfolio`;
+  document.getElementById('pieCenterPL').innerHTML = `<span style="color:${plColor}" class="blur-val">${s.pl>=0?'+':''}${fmtL(s.pl)}</span>`;
+  document.getElementById('pieCenterPct').textContent = `${sPct}% of portfolio`;
 
   // Show expanded stock list below pie
   const expanded = document.getElementById('pieExpanded');
@@ -2348,13 +2362,12 @@ function expandPieSlice(name, data, color, totalVal){
   title.style.color = color;
   title.innerHTML = `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${color};margin-right:6px"></span>${name} — ${s.stocks.length} stock${s.stocks.length>1?'s':''}`;
 
-  // Sort by current value descending
   const sorted = [...s.stocks].sort((a,b)=>b.current_value-a.current_value);
   const totalSectorVal = sorted.reduce((sum,h)=>sum+h.current_value,0);
 
   stocksEl.innerHTML = sorted.map(h=>{
     const weight = (h.current_value / totalSectorVal * 100).toFixed(1);
-    const plColor = h.pnl>=0 ? 'var(--gain)' : 'var(--loss)';
+    const hPlColor = h.pnl>=0 ? 'var(--gain)' : 'var(--loss)';
     const barW = Math.min(parseFloat(weight), 100);
     return `
       <div style="padding:8px 12px;border-bottom:1px solid var(--border);cursor:pointer"
@@ -2362,11 +2375,11 @@ function expandPieSlice(name, data, color, totalVal){
            onmouseover="this.style.background='var(--s3)'" onmouseout="this.style.background=''">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
           <span style="font-size:0.75rem;font-weight:700">${h.tradingsymbol}</span>
-          <span style="font-size:0.72rem;font-weight:600;color:${plColor}" class="blur-val">${h.pnl>=0?'+':''}${fmtL(h.pnl)}</span>
+          <span style="font-size:0.72rem;font-weight:600;color:${hPlColor}" class="blur-val">${h.pnl>=0?'+':''}${fmtL(h.pnl)}</span>
         </div>
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
-          <span style="font-size:0.62rem;color:var(--muted)">${weight}% of sector</span>
-          <span style="font-size:0.65rem;color:${plColor}">${pct(h.pnl_pct)}</span>
+          <span style="font-size:0.62rem;color:var(--muted)">${weight}% of sector · <span class="blur-val">${fmtL(h.current_value)}</span></span>
+          <span style="font-size:0.65rem;color:${hPlColor}">${pct(h.pnl_pct)}</span>
         </div>
         <div style="height:3px;background:var(--s3);border-radius:2px;overflow:hidden">
           <div style="height:100%;width:${barW}%;background:${color};border-radius:2px;opacity:0.7"></div>
@@ -2375,7 +2388,10 @@ function expandPieSlice(name, data, color, totalVal){
   }).join('');
 
   expanded.style.display = 'block';
-  // Also show detail panel on the right side
+  // Rewire blur peek on freshly injected elements
+  if(blurActive) setTimeout(()=>rewireBlurPeek(expanded),0);
+  if(blurActive) setTimeout(()=>rewireBlurPeek(document.getElementById('pieCenter')),0);
+  // Also show detail panel on right side
   showSectorDetail(name, data, color, totalVal);
 }
 
