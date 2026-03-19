@@ -2296,6 +2296,8 @@ function renderSectors(d){
 
   // LEGEND
   // SECTOR ALLOCATION CARDS — each row expands inline below it on click, toggles closed on re-click
+  // Store sector metadata so toggleSector() can access it without inline quote issues
+  window._sectorMeta = {};
   document.getElementById('sectorRows').innerHTML = sectors.map(([name,v],i)=>{
     const weight  = (v.value/totalVal*100).toFixed(1);
     const plClr   = v.pl>=0?'var(--gain)':'var(--loss)';
@@ -2303,13 +2305,15 @@ function renderSectors(d){
     const uid     = 'sec_'+i;
     const sorted  = [...v.stocks].sort((a,b)=>b.current_value-a.current_value);
     const totalSV = sorted.reduce((s,h)=>s+h.current_value,0);
+    // Store metadata for toggleSector to use (avoids quote escaping issues in onclick)
+    window._sectorMeta[uid] = {name, pl:v.pl, weight, color:COLORS[i%COLORS.length]};
     const stocksHtml = sorted.map(h=>{
       const sw     = (h.current_value/totalSV*100).toFixed(1);
       const hPlClr = h.pnl>=0?'var(--gain)':'var(--loss)';
       const hBarW  = Math.min(parseFloat(sw),100);
-      return `<div style="display:flex;align-items:center;gap:10px;padding:7px 12px 7px 22px;border-bottom:1px solid var(--border)"
+      return `<div style="display:flex;align-items:center;gap:10px;padding:7px 12px 7px 22px;border-bottom:1px solid var(--border);cursor:pointer"
            onclick="window.open('https://www.tradingview.com/chart/?symbol=${h.exchange||'NSE'}%3A${h.tradingsymbol}','_blank')"
-           style="cursor:pointer" onmouseover="this.style.background='var(--s3)'" onmouseout="this.style.background=''">
+           onmouseover="this.style.background='var(--s3)'" onmouseout="this.style.background=''">
         <div style="flex:1;min-width:0">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">
             <span style="font-size:0.73rem;font-weight:700">${h.tradingsymbol} <span style="font-size:0.55rem;color:var(--muted);font-weight:400">↗</span></span>
@@ -2325,11 +2329,10 @@ function renderSectors(d){
         </div>
       </div>`;
     }).join('');
-
     return `
-    <div id="${uid}_wrap">
+    <div>
       <div style="display:flex;align-items:center;gap:10px;padding:8px 4px;border-bottom:1px solid var(--border);cursor:pointer;user-select:none"
-           onclick="(function(){const el=document.getElementById('${uid}_stocks');const ar=document.getElementById('${uid}_ar');const open=el.style.display!=='none';el.style.display=open?'none':'block';ar.style.transform=open?'rotate(0deg)':'rotate(90deg)';if(!open){const ctr=document.getElementById('pieCenterName');if(ctr)ctr.textContent='${name}';const pl=document.getElementById('pieCenterPL');if(pl)pl.innerHTML='<span style=\"color:${v.pl>=0?'var(--gain)':'var(--loss)'}\" class=\"blur-val\">${v.pl>=0?'+':''}${fmtL(v.pl)}</span>';const pc=document.getElementById('pieCenterPct');if(pc)pc.textContent='${weight}% of portfolio';}}).call(this)"
+           onclick="toggleSector('${uid}')"
            onmouseover="this.style.background='var(--s3)'" onmouseout="this.style.background=''">
         <div style="width:10px;height:10px;border-radius:2px;background:${COLORS[i%COLORS.length]};flex-shrink:0"></div>
         <div style="flex:1;min-width:0">
@@ -2345,9 +2348,9 @@ function renderSectors(d){
             <span style="font-size:0.65rem;color:var(--muted);min-width:36px;text-align:right">${weight}%</span>
           </div>
         </div>
-        <span id="${uid}_ar" style="font-size:0.7rem;color:var(--muted);transition:transform 0.2s">›</span>
+        <span id="${uid}_ar" style="font-size:0.7rem;color:var(--muted);display:inline-block;transition:transform 0.2s">›</span>
       </div>
-      <div id="${uid}_stocks" style="display:none;background:var(--s2);border-bottom:1px solid var(--border)">
+      <div id="${uid}_stocks" style="display:none;background:var(--s2);border-bottom:2px solid var(--border)">
         ${stocksHtml}
       </div>
     </div>`;
@@ -2373,6 +2376,28 @@ function renderSectors(d){
   window._sectorData  = Object.fromEntries(sectors);
   window._sectorTotal = totalVal;
   if(blurActive) setTimeout(()=>rewireBlurPeek(document.getElementById('sectorRows')),0);
+}
+
+function toggleSector(uid){
+  const el  = document.getElementById(uid+'_stocks');
+  const ar  = document.getElementById(uid+'_ar');
+  if(!el) return;
+  const open = el.style.display !== 'none';
+  el.style.display = open ? 'none' : 'block';
+  if(ar) ar.style.transform = open ? 'rotate(0deg)' : 'rotate(90deg)';
+  // Update pie center label when opening
+  if(!open){
+    const meta = window._sectorMeta && window._sectorMeta[uid];
+    if(meta){
+      const ctr = document.getElementById('pieCenterName');
+      if(ctr) ctr.textContent = meta.name;
+      const pl = document.getElementById('pieCenterPL');
+      if(pl) pl.innerHTML = '<span style="color:'+(meta.pl>=0?'var(--gain)':'var(--loss)')+'" class="blur-val">'+(meta.pl>=0?'+':'')+fmtL(meta.pl)+'</span>';
+      const pc = document.getElementById('pieCenterPct');
+      if(pc) pc.textContent = meta.weight+'% of portfolio';
+    }
+    if(blurActive) setTimeout(()=>rewireBlurPeek(el),0);
+  }
 }
 
 function expandPieSlice(name, data, color, totalVal){
