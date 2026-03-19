@@ -1297,8 +1297,9 @@ tbody tr:last-child td{border-bottom:none;}
         </label>
       </div>
     </div>
-    <!-- PIE + expanded stocks (full width) -->
+    <!-- PIE + compact legend always visible, stock detail expands on click -->
     <div style="display:flex;gap:24px;align-items:flex-start;flex-wrap:wrap">
+      <!-- LEFT: Pie chart -->
       <div style="flex-shrink:0">
         <div style="position:relative;width:300px;height:300px">
           <canvas id="sectorChart" width="300" height="300"></canvas>
@@ -1309,13 +1310,18 @@ tbody tr:last-child td{border-bottom:none;}
           </div>
         </div>
       </div>
-      <!-- Expanded stocks + summary on the right of pie -->
+      <!-- RIGHT: Compact allocation cards (always visible) + stock detail (expands on click) -->
       <div style="flex:1;min-width:300px">
+        <!-- Compact sector allocation list — always shown, click any row to expand stocks -->
+        <div id="sectorRows" style="margin-bottom:12px"></div>
+        <!-- Expanded stock detail — shows when a sector is clicked -->
         <div id="pieExpanded" style="display:none;margin-bottom:12px;background:var(--s2);border-radius:8px;border:1px solid var(--border);overflow:hidden">
-          <div id="pieExpandedTitle" style="padding:8px 12px;font-size:0.65rem;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;border-bottom:1px solid var(--border)"></div>
+          <div id="pieExpandedTitle" style="padding:8px 12px;font-size:0.65rem;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+            <span id="pieExpandedTitleText"></span>
+            <button onclick="document.getElementById('pieExpanded').style.display='none'" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:0.9rem;padding:0">✕</button>
+          </div>
           <div id="pieExpandedStocks"></div>
         </div>
-        <div id="sectorRows" style="display:none"></div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px" id="sectorSummary"></div>
       </div>
     </div>
@@ -1624,7 +1630,10 @@ function showPage(name){
   if(name==='calendar') renderCalendar();
   if(name==='journal') initJournal();
   if(name==='news'&&lastData) loadNews(lastData);
-  if(name==='analytics'&&lastData) renderHoldingsAnalytics(lastData);
+  if(name==='analytics'){
+    if(lastData) renderHoldingsAnalytics(lastData);
+    else loadData();
+  }
 }
 
 // ── AUTH ───────────────────────────────────────────────
@@ -2287,9 +2296,31 @@ function renderSectors(d){
   };
 
   // LEGEND
-  // SECTOR ROWS
-  // sectorRows hidden — stocks shown in pieExpanded below pie on click
-  document.getElementById('sectorRows').innerHTML = '';
+  // SECTOR ALLOCATION CARDS — compact, always visible, click to expand stock detail
+  document.getElementById('sectorRows').innerHTML = sectors.map(([name,v],i)=>{
+    const weight = (v.value/totalVal*100).toFixed(1);
+    const plClr  = v.pl>=0?'var(--gain)':'var(--loss)';
+    const barW   = Math.min(v.value/totalVal*100, 100);
+    return `<div style="display:flex;align-items:center;gap:10px;padding:7px 4px;border-bottom:1px solid var(--border);cursor:pointer"
+         onclick="expandPieSlice('${name}',null,'${COLORS[i%COLORS.length]}',${totalVal})"
+         onmouseover="this.style.background='var(--s3)'" onmouseout="this.style.background=''">
+      <div style="width:10px;height:10px;border-radius:2px;background:${COLORS[i%COLORS.length]};flex-shrink:0"></div>
+      <div style="flex:1;min-width:0">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+          <span style="font-size:0.76rem;font-weight:600">${name}</span>
+          <span style="font-size:0.62rem;color:var(--muted)">${v.stocks.length} stock${v.stocks.length>1?'s':''}</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <div style="flex:1;height:4px;background:var(--s3);border-radius:2px;overflow:hidden">
+            <div style="height:100%;width:${barW}%;background:${COLORS[i%COLORS.length]};border-radius:2px"></div>
+          </div>
+          <span style="font-size:0.68rem;font-weight:600;color:${plClr};min-width:50px;text-align:right" class="blur-val">${v.pl>=0?'+':''}${fmtL(v.pl)}</span>
+          <span style="font-size:0.65rem;color:var(--muted);min-width:36px;text-align:right">${weight}%</span>
+        </div>
+      </div>
+      <span style="font-size:0.7rem;color:var(--muted)">›</span>
+    </div>`;
+  }).join('');
 
   // SUMMARY
   const gainSectors = sectors.filter(([,v])=>v.pl>0);
@@ -2310,6 +2341,7 @@ function renderSectors(d){
 
   window._sectorData  = Object.fromEntries(sectors);
   window._sectorTotal = totalVal;
+  if(blurActive) setTimeout(()=>rewireBlurPeek(document.getElementById('sectorRows')),0);
 }
 
 function expandPieSlice(name, data, color, totalVal){
@@ -2329,7 +2361,7 @@ function expandPieSlice(name, data, color, totalVal){
   const stocksEl = document.getElementById('pieExpandedStocks');
 
   title.style.color = color;
-  title.innerHTML = `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${color};margin-right:6px"></span>${name} — ${s.stocks.length} stock${s.stocks.length>1?'s':''}`;
+  document.getElementById('pieExpandedTitleText').innerHTML = `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${color};margin-right:6px"></span>${name} — ${s.stocks.length} stock${s.stocks.length>1?'s':''}`;
 
   const sorted = [...s.stocks].sort((a,b)=>b.current_value-a.current_value);
   const totalSectorVal = sorted.reduce((sum,h)=>sum+h.current_value,0);
