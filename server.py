@@ -1961,6 +1961,7 @@ function renderHoldingsAnalytics(d){
   // ── UNREALISED (current open holdings) ──
   const winners=holdings.filter(h=>h.pnl>0);
   const losers=holdings.filter(h=>h.pnl<0);
+  const neutral=holdings.filter(h=>h.pnl===0);
   const unrealisedProfit=winners.reduce((s,h)=>s+h.pnl,0);
   const unrealisedLoss=Math.abs(losers.reduce((s,h)=>s+h.pnl,0));
 
@@ -2249,7 +2250,7 @@ function renderSectors(d){
 
   const viewEl = document.querySelector('input[name="sectorView"]:checked');
   const view   = viewEl ? viewEl.value : 'value';
-  const sectors = Object.entries(sectorMap).sort((a,b)=>b[1].pl - a[1].pl);
+  const sectors = Object.entries(sectorMap).sort((a,b)=>b[1].value - a[1].value);
   const totalVal     = holdings.reduce((s,h)=>s+h.current_value, 0);
   const totalInvested= holdings.reduce((s,h)=>s+h.invested_value, 0);
   const maxBar = view==='pl'
