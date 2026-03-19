@@ -834,7 +834,7 @@ body{background:var(--bg);color:var(--text);font-family:'Inter',sans-serif;font-
 .ticker-item{display:inline-flex;align-items:center;gap:9px;padding:0 24px;cursor:pointer;text-decoration:none;color:var(--text);transition:opacity 0.15s;white-space:nowrap;height:100%;}
 .ticker-item:hover{opacity:0.75;background:var(--s2);}
 .ticker-name{font-size:0.75rem;font-weight:600;color:var(--muted);letter-spacing:0.3px;}
-.ticker-price{font-family:'DM Mono',monospace;font-size:0.85rem;font-weight:700;}
+.ticker-price{font-family:'DM Mono',monospace;font-size:0.85rem;font-weight:500;}
 .ticker-chg{font-family:'DM Mono',monospace;font-size:0.78rem;font-weight:500;}
 .ticker-sep{color:var(--border);font-size:0.8rem;}
 
@@ -1220,7 +1220,9 @@ tbody tr:last-child td{border-bottom:none;}
   </div>
 
   <div class="panel">
-    <div class="panel-title">Holdings <span id="holdCount"></span></div>
+    <div class="panel-title">Holdings <span id="holdCount"></span>
+      <button id="clearAllRisksBtn" onclick="clearAllRisks()" style="display:none;font-size:0.6rem;padding:2px 8px;border-radius:4px;border:1px solid var(--loss);background:transparent;color:var(--loss);cursor:pointer;font-family:'Inter',sans-serif" title="Remove all custom risk limits">✕ Clear All Custom</button>
+    </div>
     <div class="tbl-wrap">
       <table>
         <thead><tr>
@@ -1295,27 +1297,25 @@ tbody tr:last-child td{border-bottom:none;}
         </label>
       </div>
     </div>
-    <div style="display:grid;grid-template-columns:320px 1fr;gap:20px;align-items:start">
-      <!-- PIE CHART — click slice to expand and show stocks inside -->
-      <div style="position:relative">
-        <div style="position:relative;width:300px;height:300px;margin:0 auto">
+    <!-- PIE + expanded stocks (full width) -->
+    <div style="display:flex;gap:24px;align-items:flex-start;flex-wrap:wrap">
+      <div style="flex-shrink:0">
+        <div style="position:relative;width:300px;height:300px">
           <canvas id="sectorChart" width="300" height="300"></canvas>
-          <!-- Center label — shows sector name + P&L when a slice is clicked -->
           <div id="pieCenter" style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none;padding:30px;text-align:center">
             <div id="pieCenterName" style="font-size:0.7rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px">Click a slice</div>
             <div id="pieCenterPL" style="font-size:1rem;font-weight:700;margin-top:3px"></div>
             <div id="pieCenterPct" style="font-size:0.65rem;color:var(--muted);margin-top:1px"></div>
           </div>
         </div>
-        <!-- Expanded stock list — appears below pie when slice clicked -->
-        <div id="pieExpanded" style="display:none;margin-top:12px;background:var(--s2);border-radius:8px;border:1px solid var(--border);overflow:hidden">
+      </div>
+      <!-- Expanded stocks + summary on the right of pie -->
+      <div style="flex:1;min-width:300px">
+        <div id="pieExpanded" style="display:none;margin-bottom:12px;background:var(--s2);border-radius:8px;border:1px solid var(--border);overflow:hidden">
           <div id="pieExpandedTitle" style="padding:8px 12px;font-size:0.65rem;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;border-bottom:1px solid var(--border)"></div>
           <div id="pieExpandedStocks"></div>
         </div>
-      </div>
-      <!-- SECTOR ROWS + SUMMARY -->
-      <div>
-        <div id="sectorRows" style="margin-bottom:12px"></div>
+        <div id="sectorRows" style="display:none"></div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px" id="sectorSummary"></div>
       </div>
     </div>
@@ -1367,6 +1367,20 @@ tbody tr:last-child td{border-bottom:none;}
           <div class="jtool-sep"></div>
           <button class="jtool" onclick="triggerImageAttach()" title="Attach image / screenshot / chart">📎 Attach Image</button>
           <input type="file" id="journalImageInput" accept="image/*" multiple style="display:none" onchange="handleImageAttach(this)">
+          <div class="jtool-sep"></div>
+          <!-- Market context templates -->
+          <button class="jtool" onclick="jInsert('## 📈 Market Outlook\n','',true)" title="Market Outlook section">📈 Outlook</button>
+          <button class="jtool" onclick="jInsert('## ❌ Mistakes\n','',true)" title="Mistakes section">❌ Mistakes</button>
+          <button class="jtool" onclick="jInsert('## 💡 Learnings\n','',true)" title="Learnings section">💡 Learnings</button>
+          <div class="jtool-sep"></div>
+          <!-- Market condition tags -->
+          <button class="jtool" onclick="jInsert('#bull-market ','',false)" title="Bull market tag" style="color:#00897b">#Bull</button>
+          <button class="jtool" onclick="jInsert('#bear-market ','',false)" title="Bear market tag" style="color:#e53935">#Bear</button>
+          <button class="jtool" onclick="jInsert('#sideways ','',false)" title="Sideways market tag" style="color:var(--warn)">#Sideways</button>
+          <button class="jtool" onclick="jInsert('#breakout ','',false)" title="Breakout tag">#Breakout</button>
+          <button class="jtool" onclick="jInsert('#sl-hit ','',false)" title="Stop loss hit tag" style="color:var(--loss)">#SL-Hit</button>
+          <button class="jtool" onclick="jInsert('#target-hit ','',false)" title="Target hit tag" style="color:var(--gain)">#Target</button>
+          <button class="jtool" onclick="jInsert('#momentum ','',false)" title="Momentum tag">#Momentum</button>
           <div class="jtool-sep"></div>
           <button class="jtool" onclick="jClear()" title="Clear entry" style="color:var(--loss)">✕ Clear</button>
         </div>
@@ -1670,9 +1684,12 @@ async function updateIndexTickers(){
       const priceEl = document.getElementById(priceId);
       const chgEl   = document.getElementById(chgId);
       if(!data||!data.price) return;
-      if(priceEl) priceEl.textContent = data.price.toLocaleString('en-IN',{maximumFractionDigits:2});
+      const up = data.change >= 0;
+      if(priceEl){
+        priceEl.textContent = data.price.toLocaleString('en-IN',{maximumFractionDigits:2});
+        priceEl.style.color = up ? 'var(--gain)' : 'var(--loss)';
+      }
       if(chgEl){
-        const up = data.change >= 0;
         chgEl.textContent = (up?'▲ +':'▼ ')+Math.abs(data.changePct).toFixed(2)+'%';
         chgEl.style.color = up ? 'var(--gain)' : 'var(--loss)';
       }
@@ -1699,6 +1716,8 @@ async function loadData(){
     lastData=d;
     if(d.stock_risks)stockRiskLimits=d.stock_risks;
     renderOverview(d);
+    // If analytics tab is currently open, refresh it too
+    if(document.getElementById('page-analytics').classList.contains('active')) renderHoldingsAnalytics(d);
     const t=new Date().toLocaleTimeString('en-IN');
     document.getElementById('updatedBar').textContent='Updated '+t;
     document.getElementById('updatedLbl').textContent=t;
@@ -1727,7 +1746,7 @@ function renderOverview(d){
     ['Total Capital',`<span class="blur-val">${fmtL(p.total_capital)}</span>`,'Holdings + Cash',null],
     ['Invested',`<span class="blur-val">${fmtL(p.total_cost)}</span>`,p.holdings_count+' stocks',null],
     ['P&L',`<span class="blur-val">${(p.total_pl>=0?'+':'')+fmtL(p.total_pl)}</span>`,pct(p.total_pl_pct),gc(p.total_pl)],
-    ['Today\'s P&L',`<span class="blur-val">${(dailyPL>=0?'+':'')+fmtL(dailyPL)}</span>`,pct(dailyPct,2),gc(dailyPL)],
+    ['Today\'s P&L',`<span class="blur-val">${(dailyPL>=0?'+':'')+fmtL(dailyPL)}</span>`,`${pct(dailyPct,2)} · portfolio ${dailyPL>=0?'▲':'▼'}`,gc(dailyPL)],
     ['Cash',`<span class="blur-val">${fmtL(p.cash_available)}</span>`,'Available',null],
   ].map(([l,v,s,c])=>`<div class="card"><div class="card-lbl">${l}</div><div class="card-val ${c||''}">${v}</div>${s?`<div class="card-sub">${s}</div>`:''}</div>`).join('');
 
@@ -1801,6 +1820,8 @@ function renderOverview(d){
 
   // HOLDINGS TABLE
   document.getElementById('holdCount').textContent=d.holdings.length+' stocks';
+  const btn=document.getElementById('clearAllRisksBtn');
+  if(btn) btn.style.display=Object.keys(stockRiskLimits).length>0?'inline-block':'none';
   const pl=st.pos_loss_pct;
   document.getElementById('holdTbody').innerHTML=d.holdings.map(h=>{
     const customLimit=stockRiskLimits[h.tradingsymbol]||pl;
@@ -1835,7 +1856,7 @@ function renderOverview(d){
       <td class="m">${h.weight_pct}%</td>
       <td style="color:${riskColor};font-size:0.72rem">${customLimit}%</td>
       <td>
-        <div style="display:flex;align-items:center;gap:3px;flex-wrap:wrap">${badge}<button class="risk-edit-btn" onclick="openRiskModal('${h.tradingsymbol}',${customLimit})">${isCustom?customLimit+'%':''} ✎</button>${sellBtn}</div>
+        <div style="display:flex;align-items:center;gap:3px;flex-wrap:wrap">${badge}<button class="risk-edit-btn" onclick="openRiskModal('${h.tradingsymbol}',${customLimit})">${isCustom?customLimit+'%':''} ✎</button>${isCustom?`<button class="risk-edit-btn" style="color:var(--loss);border-color:var(--loss)" onclick="clearStockRisk('${h.tradingsymbol}')" title="Remove custom limit">✕</button>`:''} ${sellBtn}</div>
         <div class="mini-bar"><div class="mini-fill" style="width:${isProfit?100:Math.min(ratio*100,100)}%;background:${barClr}"></div></div>
       </td>
     </tr>`;
@@ -2267,57 +2288,8 @@ function renderSectors(d){
 
   // LEGEND
   // SECTOR ROWS
-  document.getElementById('sectorRows').innerHTML = sectors.map(([name,v],i)=>{
-    const dispVal = view==='pl'?v.pl:view==='invested'?v.invested:v.value;
-    const barW    = Math.min(Math.abs(dispVal)/maxBar*100, 100);
-    const barClr  = view==='pl'?(v.pl>=0?'var(--gain)':'var(--loss)'):COLORS[i%COLORS.length];
-    const uid     = 'sec_'+i;
-    const sortedStocks = [...v.stocks].sort((a,b)=>b.pnl-a.pnl);
-    const stocksHtml = sortedStocks.map(h=>`
-      <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 10px 6px 18px;border-bottom:1px solid var(--border)">
-        <a href="https://www.tradingview.com/chart/?symbol=${h.exchange||'NSE'}%3A${h.tradingsymbol}"
-           target="_blank" style="font-size:0.74rem;font-weight:600;color:var(--text);text-decoration:none">${h.tradingsymbol} ↗</a>
-        <div style="display:flex;align-items:center;gap:10px">
-          <span style="font-size:0.68rem;color:var(--muted)" class="blur-val">${fmtL(h.current_value)}</span>
-          <span style="font-size:0.74rem;font-weight:600;color:${h.pnl>=0?'var(--gain)':'var(--loss)'};min-width:60px;text-align:right" class="blur-val">${h.pnl>=0?'+':''}${fmtL(h.pnl)}</span>
-          <span style="font-size:0.7rem;color:${h.pnl_pct>=0?'var(--gain)':'var(--loss)'};min-width:44px;text-align:right">${pct(h.pnl_pct)}</span>
-        </div>
-      </div>`).join('');
-
-    return `<div style="border-bottom:1px solid var(--border)">
-      <div style="display:flex;align-items:center;gap:10px;padding:9px 0 5px;cursor:pointer"
-           onclick="const el=document.getElementById('${uid}');const ar=document.getElementById('${uid}a');el.style.display=el.style.display==='none'?'block':'none';ar.textContent=el.style.display==='none'?'▸':'▾';expandPieSlice('${name}',null,'${COLORS[i%COLORS.length]}',${totalVal})">
-        <div style="width:10px;height:10px;border-radius:2px;background:${COLORS[i%COLORS.length]};flex-shrink:0"></div>
-        <div style="flex:1;min-width:0">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px">
-            <div style="display:flex;align-items:center;gap:6px">
-              <span style="font-weight:600;font-size:0.78rem">${name}</span>
-              <span style="font-size:0.62rem;color:var(--muted)">${v.stocks.length} stock${v.stocks.length>1?'s':''}</span>
-            </div>
-            <div style="display:flex;align-items:center;gap:8px">
-              <span style="font-family:'DM Mono',monospace;font-size:0.72rem;font-weight:600;color:${v.pl>=0?'var(--gain)':'var(--loss)'}" class="blur-val">${v.pl>=0?'+':''}${fmtL(v.pl)}</span>
-              <span style="font-size:0.65rem;color:var(--muted)">${(v.value/totalVal*100).toFixed(1)}%</span>
-              <span id="${uid}a" style="font-size:0.7rem;color:var(--muted)">▸</span>
-            </div>
-          </div>
-          <div style="height:4px;background:var(--s3);border-radius:2px;overflow:hidden">
-            <div style="height:100%;width:${barW}%;background:${barClr};border-radius:2px;transition:width 0.6s ease"></div>
-          </div>
-        </div>
-      </div>
-      <div id="${uid}" style="display:none;background:var(--s2);border-radius:6px;margin-bottom:8px;overflow:hidden;border:1px solid var(--border)">
-        <div style="display:flex;justify-content:space-between;padding:5px 10px;background:var(--s3)">
-          <span style="font-size:0.6rem;font-weight:600;color:var(--muted);text-transform:uppercase">Stock</span>
-          <div style="display:flex;gap:10px">
-            <span style="font-size:0.6rem;color:var(--muted);text-transform:uppercase">Value</span>
-            <span style="font-size:0.6rem;color:var(--muted);text-transform:uppercase;min-width:60px">P&L ₹</span>
-            <span style="font-size:0.6rem;color:var(--muted);text-transform:uppercase;min-width:44px;text-align:right">Return</span>
-          </div>
-        </div>
-        ${stocksHtml}
-      </div>
-    </div>`;
-  }).join('');
+  // sectorRows hidden — stocks shown in pieExpanded below pie on click
+  document.getElementById('sectorRows').innerHTML = '';
 
   // SUMMARY
   const gainSectors = sectors.filter(([,v])=>v.pl>0);
@@ -2612,14 +2584,24 @@ async function loadJournalFromServer(){
 function searchJournal(query){
   const resultsEl=document.getElementById('searchResults');
   if(!query.trim()){resultsEl.style.display='none';return;}
-  const results=Object.entries(journalData).filter(([d,t])=>t.toLowerCase().includes(query.toLowerCase())||d.includes(query)).sort((a,b)=>b[0].localeCompare(a[0]));
+  const q=query.toLowerCase().trim();
+  // Tag search — prefix # searches for exact tags
+  const results=Object.entries(journalData).filter(([d,t])=>{
+    const text=t.toLowerCase();
+    // Match tag exactly if query starts with #
+    if(q.startsWith('#')) return text.includes(q);
+    return text.includes(q)||d.includes(q);
+  }).sort((a,b)=>b[0].localeCompare(a[0]));
   if(!results.length){resultsEl.style.display='none';return;}
   resultsEl.style.display='block';
-  resultsEl.innerHTML=results.map(([d,t])=>`
-    <div class="search-result-item" onclick="loadJournalEntry('${d}');document.getElementById('searchResults').style.display='none'">
+  resultsEl.innerHTML=results.map(([d,t])=>{
+    // Highlight tags in preview
+    const preview=t.substring(0,100).replace(/#[\w-]+/g,tag=>`<span style="color:var(--accent);font-weight:600">${tag}</span>`);
+    return `<div class="search-result-item" onclick="loadJournalEntry('${d}');document.getElementById('searchResults').style.display='none'">
       <div class="sri-date">${new Date(d).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})}</div>
-      <div class="sri-preview">${t.substring(0,80)}${t.length>80?'...':''}</div>
-    </div>`).join('');
+      <div class="sri-preview">${preview}${t.length>100?'...':''}</div>
+    </div>`;
+  }).join('');
 }
 
 function buildMiniCal(year,month){
@@ -2784,6 +2766,21 @@ async function loadStockRiskLimits(){try{const r=await fetch('/api/stock-risks')
 function openRiskModal(ticker,cur){riskModalTicker=ticker;document.getElementById('riskModalDesc').textContent=`Custom loss limit for ${ticker}. Default: ${document.getElementById('maxLoss').value}%`;document.getElementById('riskModalInput').value=stockRiskLimits[ticker]!==undefined?stockRiskLimits[ticker]:'';document.getElementById('riskModal').classList.add('open');setTimeout(()=>document.getElementById('riskModalInput').focus(),100);}
 function closeRiskModal(){document.getElementById('riskModal').classList.remove('open');riskModalTicker='';}
 async function saveStockRisk(){const v=document.getElementById('riskModalInput').value.trim();if(v==='')delete stockRiskLimits[riskModalTicker];else stockRiskLimits[riskModalTicker]=parseFloat(v);closeRiskModal();try{await fetch('/api/stock-risks',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(stockRiskLimits)});}catch(e){}if(lastData)renderOverview(lastData);}
+
+async function clearStockRisk(ticker){
+  delete stockRiskLimits[ticker];
+  try{await fetch('/api/stock-risks',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(stockRiskLimits)});}catch(e){}
+  if(lastData) renderOverview(lastData);
+}
+
+async function clearAllRisks(){
+  if(!confirm('Remove all custom risk limits and use the default for all stocks?')) return;
+  stockRiskLimits={};
+  try{await fetch('/api/stock-risks',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})});}catch(e){}
+  const btn=document.getElementById('clearAllRisksBtn');
+  if(btn) btn.style.display='none';
+  if(lastData) renderOverview(lastData);
+}
 document.getElementById('riskModal').addEventListener('click',function(e){if(e.target===this)closeRiskModal();});
 
 // ── INIT ───────────────────────────────────────────────
