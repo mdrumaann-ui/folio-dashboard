@@ -1189,8 +1189,7 @@ tbody tr:last-child td{border-bottom:none;}
       <input type="number" id="cagrTarget" value="100" min="1" max="10000" onchange="saveSettings();loadData()">
       <small style="font-size:0.58rem;color:var(--muted)">e.g. 100 = double your money</small>
     </div>
-    <div class="sg"><label>Max Loss %</label><input type="number" id="maxLoss" value="10" min="1" max="50" onchange="saveSettings();loadData()"></div>
-    <div class="sg"><label>Per Stock Loss %</label><input type="number" id="posLoss" value="10" min="1" max="50" onchange="saveSettings();loadData()"></div>
+    <div class="sg"><label>Max Loss %</label><input type="number" id="maxLoss" value="10" min="1" max="50" onchange="saveSettings();loadData()" title="Max portfolio drawdown % AND default per-stock stop loss %"></div>
     <span class="updated-lbl" id="updatedBar"></span>
   </div>
   <div class="alert" id="alertBanner"></div>
@@ -1317,7 +1316,6 @@ tbody tr:last-child td{border-bottom:none;}
       <!-- SECTOR ROWS + SUMMARY -->
       <div>
         <div id="sectorRows" style="margin-bottom:12px"></div>
-        <div id="sectorDetails" style="display:none;background:var(--s2);border-radius:8px;padding:14px;border:1px solid var(--border);margin-bottom:12px"></div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px" id="sectorSummary"></div>
       </div>
     </div>
@@ -1687,7 +1685,8 @@ async function updateIndexTickers(){
   }catch(e){ console.log('Ticker fetch failed:', e); }
 }
 async function loadData(){
-  const params=new URLSearchParams({cagr_target:document.getElementById('cagrTarget').value,max_loss_pct:document.getElementById('maxLoss').value,pos_loss_pct:document.getElementById('posLoss').value,invested_since:'2020-01-01'});
+  const maxLossVal = document.getElementById('maxLoss').value;
+  const params=new URLSearchParams({cagr_target:document.getElementById('cagrTarget').value,max_loss_pct:maxLossVal,pos_loss_pct:maxLossVal,invested_since:'2020-01-01'});
   try{
     const r=await fetch(`/api/summary?${params}`);const d=await r.json();
     if(d.error){
@@ -1796,8 +1795,7 @@ function renderOverview(d){
         <div style="font-weight:700;font-size:0.82rem;color:${rClr}" class="blur-val">${fmtL(rs.loss_remaining)}</div>
       </div>
     </div>
-    ${rs.breaching_count>0?`<div style="margin-top:8px;padding:7px 10px;background:var(--loss-bg);border-radius:5px;border-left:3px solid var(--loss);font-size:0.7rem;color:var(--loss)">⚠ ${rs.breaching_count} stock${rs.breaching_count>1?'s':''} breaching limit</div>`:''}`;
-
+    ${rs.breaching_count>0?'<div style="margin-top:8px;padding:7px 10px;background:var(--loss-bg);border-radius:5px;border-left:3px solid var(--loss);font-size:0.7rem;color:var(--loss)">🔴 '+rs.breaching_count+' stock'+(rs.breaching_count>1?'s':'')+' breaching limit: '+rs.breaching.map(b=>b.ticker+' ('+b.pnl_pct.toFixed(1)+'%)').join(', ')+'</div>':''}`;
   // GROWTH CHART
   renderGrowthChart(d);
 
@@ -1971,12 +1969,11 @@ function renderHoldingsAnalytics(d){
   const total=holdings.length;
   const hasRealised = realisedWins+realisedLosses > 0;
 
-  document.getElementById('holdingsAnalytics').innerHTML=`
-    ${hasRealised?`<div style="padding:6px 10px;background:var(--gain-bg);border-radius:5px;border-left:3px solid var(--gain);font-size:0.7rem;color:var(--gain);margin-bottom:10px">
-      ✅ Showing <strong>combined</strong> data: ${total} open positions + ${realisedWins+realisedLosses} closed trades from tradebook
-    </div>`:`<div style="padding:6px 10px;background:var(--s3);border-radius:5px;border-left:3px solid var(--muted);font-size:0.7rem;color:var(--muted);margin-bottom:10px">
-      ℹ️ Showing open positions only — no closed trades found in today's tradebook
-    </div>`}
+  const realisedBanner = hasRealised
+    ? '<div style="padding:6px 10px;background:var(--gain-bg);border-radius:5px;border-left:3px solid var(--gain);font-size:0.7rem;color:var(--gain);margin-bottom:10px">✅ Combined: '+total+' open + '+(realisedWins+realisedLosses)+' closed trades</div>'
+    : '<div style="padding:6px 10px;background:var(--s3);border-radius:5px;border-left:3px solid var(--muted);font-size:0.7rem;color:var(--muted);margin-bottom:10px">ℹ️ Open positions only — no closed trades in today\'s tradebook</div>';
+
+  document.getElementById('holdingsAnalytics').innerHTML= realisedBanner + `
     <div class="grid2" style="margin-bottom:12px">
       <!-- WIN RATE -->
       <div class="big-metric">
@@ -2391,8 +2388,6 @@ function expandPieSlice(name, data, color, totalVal){
   // Rewire blur peek on freshly injected elements
   if(blurActive) setTimeout(()=>rewireBlurPeek(expanded),0);
   if(blurActive) setTimeout(()=>rewireBlurPeek(document.getElementById('pieCenter')),0);
-  // Also show detail panel on right side
-  showSectorDetail(name, data, color, totalVal);
 }
 
 function showSectorDetail(name, data, color, totalVal){
@@ -2786,7 +2781,7 @@ async function loadUpcomingEvents(){await loadNews(lastData);const btn=document.
 
 // ── RISK MODAL ─────────────────────────────────────────
 async function loadStockRiskLimits(){try{const r=await fetch('/api/stock-risks');const d=await r.json();stockRiskLimits=d||{};}catch(e){stockRiskLimits={};}}
-function openRiskModal(ticker,cur){riskModalTicker=ticker;document.getElementById('riskModalDesc').textContent=`Custom loss limit for ${ticker}. Global: ${document.getElementById('posLoss').value}%`;document.getElementById('riskModalInput').value=stockRiskLimits[ticker]!==undefined?stockRiskLimits[ticker]:'';document.getElementById('riskModal').classList.add('open');setTimeout(()=>document.getElementById('riskModalInput').focus(),100);}
+function openRiskModal(ticker,cur){riskModalTicker=ticker;document.getElementById('riskModalDesc').textContent=`Custom loss limit for ${ticker}. Default: ${document.getElementById('maxLoss').value}%`;document.getElementById('riskModalInput').value=stockRiskLimits[ticker]!==undefined?stockRiskLimits[ticker]:'';document.getElementById('riskModal').classList.add('open');setTimeout(()=>document.getElementById('riskModalInput').focus(),100);}
 function closeRiskModal(){document.getElementById('riskModal').classList.remove('open');riskModalTicker='';}
 async function saveStockRisk(){const v=document.getElementById('riskModalInput').value.trim();if(v==='')delete stockRiskLimits[riskModalTicker];else stockRiskLimits[riskModalTicker]=parseFloat(v);closeRiskModal();try{await fetch('/api/stock-risks',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(stockRiskLimits)});}catch(e){}if(lastData)renderOverview(lastData);}
 document.getElementById('riskModal').addEventListener('click',function(e){if(e.target===this)closeRiskModal();});
@@ -2799,7 +2794,6 @@ function saveSettings(){
   const s={
     cagrTarget:    document.getElementById('cagrTarget').value,
     maxLoss:       document.getElementById('maxLoss').value,
-    posLoss:       document.getElementById('posLoss').value,
     investedSince: '2020-01-01',
   };
   try{ localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); }catch(e){}
@@ -2810,10 +2804,8 @@ function loadSettings(){
     const raw = localStorage.getItem(SETTINGS_KEY);
     if(!raw) return;
     const s = JSON.parse(raw);
-    if(s.cagrTarget)    document.getElementById('cagrTarget').value    = s.cagrTarget;
-    if(s.maxLoss)       document.getElementById('maxLoss').value       = s.maxLoss;
-    if(s.posLoss)       document.getElementById('posLoss').value       = s.posLoss;
-
+    if(s.cagrTarget) document.getElementById('cagrTarget').value = s.cagrTarget;
+    if(s.maxLoss)    document.getElementById('maxLoss').value    = s.maxLoss;
   }catch(e){}
 }
 
