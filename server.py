@@ -172,9 +172,10 @@ def save_snapshot(total_value, total_cost, cash, day_pl=0):
         today   = date.today().isoformat()
         history = load_history()
         if today in history:
-            # Update day_pl each refresh so calendar shows today's real intraday P&L
+            # Update day_pl and value each refresh so calendar shows real intraday P&L
             history[today]["day_pl"] = round(day_pl, 2)
-            history[today]["value"]  = round(total_value, 2)  # keep value current too
+            history[today]["value"]  = round(total_value, 2)
+            action = "updated"
         else:
             history[today] = {
                 "date":          today,
@@ -186,25 +187,31 @@ def save_snapshot(total_value, total_cost, cash, day_pl=0):
                 "pl_pct":        round((total_value - total_cost) / total_cost * 100 if total_cost > 0 else 0, 2),
                 "day_pl":        round(day_pl, 2),
             }
+            action = "created"
         if JSONBIN_BIN_ID and JSONBIN_API_KEY:
             data = json.dumps(history).encode()
             req  = urllib.request.Request(
-                JSONBIN_BASE,
-                data=data,
-                method="PUT",
+                JSONBIN_BASE, data=data, method="PUT",
                 headers={"Content-Type": "application/json", "X-Master-Key": JSONBIN_API_KEY}
             )
             urllib.request.urlopen(req, timeout=5)
+            print(f"Snapshot {action} for {today} (day_pl={day_pl:.2f}) → JSONBin")
         else:
             with open("portfolio_history.json", "w") as f:
                 json.dump(history, f, indent=2)
+            print(f"Snapshot {action} for {today} (day_pl={day_pl:.2f}) → portfolio_history.json")
     except Exception as e:
         print(f"Could not save snapshot: {e}")
 
 def get_history_series():
-    """Return sorted list of daily snapshots."""
+    """Return sorted list of daily snapshots — skips special keys like __journal__, __stock_risks__."""
     history = load_history()
-    return sorted(history.values(), key=lambda x: x["date"])
+    entries = []
+    for k, v in history.items():
+        # Only include real date entries (YYYY-MM-DD format, containing a 'date' field)
+        if isinstance(v, dict) and v.get("date") and len(k) == 10 and k[4] == "-" and k[7] == "-":
+            entries.append(v)
+    return sorted(entries, key=lambda x: x["date"])
 
 # ─────────────────────────────────────────────────────────
 # DATA HELPERS
@@ -363,7 +370,11 @@ def api_summary():
 
         # Risk based on TOTAL capital (holdings + cash)
         total_capital = total_val + cash_avail
-        max_loss_amt  = total_capital * (settings["max_loss_pct"] / 100)
+        # Risk base = what you actually deployed (cost) + available cash
+        # Using total_cost not total_val so market movements don't shift your risk limit
+        # If fully invested (no cash), base = total_cost only
+        risk_base     = total_cost + cash_avail
+        max_loss_amt  = risk_base * (settings["max_loss_pct"] / 100)
         actual_loss   = abs(total_pl) if total_pl < 0 else 0
         loss_used_pct = (actual_loss / max_loss_amt * 100) if max_loss_amt > 0 else 0
         stop_investing = actual_loss >= max_loss_amt
@@ -407,6 +418,7 @@ def api_summary():
                 "total_capital":  round(total_capital, 2),
             },
             "risk": {
+                "risk_base":      round(risk_base, 2),
                 "max_loss_amt":   round(max_loss_amt, 2),
                 "actual_loss":    round(actual_loss, 2),
                 "loss_used_pct":  round(loss_used_pct, 2),
@@ -1727,8 +1739,9 @@ function renderOverview(d){
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:7px">
       <div style="background:var(--s2);border-radius:5px;padding:8px;text-align:center">
-        <div style="font-size:0.6rem;color:var(--muted);margin-bottom:2px">TOTAL CAPITAL</div>
-        <div style="font-weight:700;font-size:0.82rem" class="blur-val">${fmtL(p.total_capital)}</div>
+        <div style="font-size:0.6rem;color:var(--muted);margin-bottom:2px">RISK BASE</div>
+        <div style="font-weight:700;font-size:0.82rem" class="blur-val">${fmtL(rs.risk_base)}</div>
+        <div style="font-size:0.55rem;color:var(--muted);margin-top:1px">Invested + Cash</div>
       </div>
       <div style="background:var(--s2);border-radius:5px;padding:8px;text-align:center">
         <div style="font-size:0.6rem;color:var(--muted);margin-bottom:2px">MAX LOSS LIMIT</div>
