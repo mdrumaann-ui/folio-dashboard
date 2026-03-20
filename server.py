@@ -20,8 +20,8 @@ from flask_cors import CORS
 # ─────────────────────────────────────────────────────────
 # CONFIG — put your keys here OR set as environment vars
 # ─────────────────────────────────────────────────────────
-API_KEY    = "14zdbrdm1hthzq4q"
-API_SECRET = "2cj57ifn3qs69f2xhb3a0ck5whqnzrlx"
+API_KEY    = os.getenv("KITE_API_KEY",    "14zdbrdm1hthzq4q")
+API_SECRET = os.getenv("KITE_API_SECRET", "2cj57ifn3qs69f2xhb3a0ck5whqnzrlx")
 
 # Your portfolio settings (can also be changed in the UI)
 CAGR_TARGET    = float(os.getenv("CAGR_TARGET",    "15"))   # % annual return goal
