@@ -312,7 +312,7 @@ def _get_history():
     now = time.time()
     if _history_cache is not None and now - _history_cache_time < 30:
         return _history_cache
-    _history_cache      = _get_history()
+    _history_cache      = load_history()
     _history_cache_time = now
     return _history_cache
 
